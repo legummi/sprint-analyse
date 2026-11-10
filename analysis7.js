@@ -1102,6 +1102,9 @@ export function analyze(frames, opts) {
     contacts, steps, hurdle, hurdles, camOff, camMoved, zoomK, zoomRatio: zn ? zn.ratio : 1,
     ground, groundTol: tol,
     quality: { detectedPct: n ? (100 * detected) / n : 0, meanVis: mean(vis), swaps: P.stats.swaps, outliers: P.stats.outliers, outlierPct: P.stats.outlierPct },
+    // Grenzen der Aufnahme: Bei wenigen Bildern pro Sekunde oder einer sehr kleinen Person sind Kontakt- und Flugzeiten
+    // (nur 2–3 Bilder pro Kontakt, Füße wenige Pixel groß) bzw. Winkel nicht belastbar – sie werden dann nicht zusammengefasst.
+    limits: { lowFps: fps < 50, smallPx: Number.isFinite(legPx) && legPx < 55, legPx: Math.round(legPx || 0), personPct: Number.isFinite(legPx) ? Math.round(100 * legPx / 0.49 / Math.max(W, H)) : 0 },
     smoothed: P, curves, rhythm, scaleSource, recoveredCount: recovered.length, edited: !!forced,
   };
 }
@@ -1182,10 +1185,12 @@ export function summarize(result) {
   const inc = result.steps.filter((s) => s.include && !s.hurdleStep);
   const side = inc.filter((s) => !s.oblique);
   const out = {};
-  for (const m of METRICS) out[m.key] = median((VIEW_SENSITIVE(m) ? side : inc).map((s) => s[m.key]));
+  const lim = result.limits || {}, TIMING = ['contactMs', 'flightMs', 'vGain', 'vBrake', 'fMean', 'fPeak'];
+  const blocked = (key, unit) => ((lim.lowFps || lim.smallPx) && TIMING.includes(key)) || (lim.smallPx && (unit === '°' || ['speedMs', 'stepLenM', 'touchdownCm', 'vertOscCm', 'hipHeightMid'].includes(key)));
+  for (const m of METRICS) out[m.key] = blocked(m.key, m.unit) ? NaN : median((VIEW_SENSITIVE(m) ? side : inc).map((s) => s[m.key]));
   out.steps = inc.length;
   const hf = (result.hurdles || (result.hurdle ? [result.hurdle] : [])).filter((h) => h && h.found);
-  if (hf.length) { for (const m of HURDLE_METRICS) out['h_' + m.key] = median(hf.map((h) => h[m.key])); out.h_count = hf.length; }
+  if (hf.length) { for (const m of HURDLE_METRICS) out['h_' + m.key] = (/^contact(TO|LD)Ms$/.test(m.key) ? blocked('contactMs', '') : m.unit === '°' && blocked('x', '°')) ? NaN : median(hf.map((h) => h[m.key])); out.h_count = hf.length; }
   return out;
 }
 
@@ -1360,7 +1365,7 @@ export function speedCurve(result, spacingM = 0) {
   for (let i = 0; i < n; i++) {
     if (!Number.isFinite(c.v[i])) continue;
     const a = []; for (let j = Math.max(0, i - w); j <= Math.min(n - 1, i + w); j += stride) if (Number.isFinite(c.v[j])) a.push(c.v[j]);
-    const m = median(a); if (Number.isFinite(m) && m > 0.5 && (c.v[i] < 0.55 * m || c.v[i] > 1.6 * m)) v[i] = NaN;
+    const m = median(a); if ((Number.isFinite(m) && m > 0.5 && (c.v[i] < 0.55 * m || c.v[i] > 1.6 * m)) || c.v[i] > 12.5 || c.v[i] < 0) v[i] = NaN;
   }
   let last = -1; for (let i = 0; i < n; i++) if (Number.isFinite(v[i])) { if (last >= 0 && i - last > 1) for (let j = last + 1; j < i; j++) v[j] = v[last] + (v[i] - v[last]) * (j - last) / (i - last); last = i; }
   const hs = (result.hurdles || []).filter((h) => h.found && Number.isFinite(h.landingIndex)).sort((a, b) => a.landingIndex - b.landingIndex);
@@ -1377,5 +1382,8 @@ export function speedCurve(result, spacingM = 0) {
   for (const [a, b, f] of fs) for (let i = a; i < b; i++) fac[i] = f;
   for (let i = 0; i < fs[0][0]; i++) fac[i] = fs[0][2];
   for (let i = fs[fs.length - 1][1]; i < n; i++) fac[i] = fs[fs.length - 1][2];
-  return { v: v.map((x, i) => (Number.isFinite(x) && Number.isFinite(fac[i]) ? x * fac[i] : x)), source: 'hurdles', factor: median(fs.map((q) => q[2])) };
+  const out = v.map((x, i) => (Number.isFinite(x) && Number.isFinite(fac[i]) ? x * fac[i] : x)), med = median(out);
+  // Passt der eingetragene Abstand nicht zu diesen Hürden (z. B. 35 m bei Übungshürden), käme ein unmögliches Tempo heraus: dann nicht eichen
+  if (!(med >= 2 && med <= 11)) return { v, source: 'video', badSpacing: true };
+  return { v: out, source: 'hurdles', factor: median(fs.map((q) => q[2])) };
 }
