@@ -1,4 +1,4 @@
-import { analyze, summarize, summarizeLR, transitionStep, hints, correlate, METRICS, HURDLE_METRICS, median, PHASES, REF, CATEGORIES, suggestPhase, evaluate, extractStride, rotatePt } from './analysis5.js';
+import { analyze, summarize, summarizeLR, transitionStep, hints, correlate, METRICS, HURDLE_METRICS, median, PHASES, REF, CATEGORIES, suggestPhase, evaluate, extractStride, rotatePt } from './analysis6.js';
 import { FigurePlayer } from './figure2.js';
 
 // ======================= Helfer =======================

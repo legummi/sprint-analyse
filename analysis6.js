@@ -108,22 +108,26 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 
 // Ausreißer = Punkt springt weg und im nächsten Bild wieder zurück (1–2 Bilder lang).
 // Ein echtes Abbremsen (z. B. Fuß setzt auf) springt nicht zurück und bleibt deshalb erhalten.
-function removeSpikes(P, n, thr, flags) {
+function removeSpikes(P, n, thr, flags, wMax = 2) {
   let removed = 0;
   for (let k = 11; k < 33; k++) {
     const a = P[k];
-    for (const w of [1, 2]) {
+    // Auch längere Aussetzer (bis ~45 ms): Ein Punkt, der weit wegspringt und kurz darauf wieder dort ist, wo er vorher war,
+    // war falsch erkannt (z. B. verdecktes Bein aufs andere gelegt) – so schnell hin und zurück geht kein Körperteil.
+    for (let w = 1; w <= wMax; w++) {
+      const need = w <= 2 ? thr : 2.5 * thr;
       for (let i = 1; i + w < n; i++) {
         const prev = a[i - 1], next = a[i + w - 1 + 1];
         if (!prev || !next || dist(prev, next) > thr * (w + 1)) continue; // Nachbarn müssen zueinander passen
-        let spike = true;
+        let spike = true, seen = 0;
         for (let j = i; j < i + w; j++) {
-          if (!a[j]) { spike = false; break; }
+          if (!a[j]) { if (w <= 2) { spike = false; break; } continue; } // in längeren Aussetzern dürfen schon verworfene Bilder liegen
+          seen++;
           const t = (j - i + 1) / (w + 1);
           const interp = [prev[0] + (next[0] - prev[0]) * t, prev[1] + (next[1] - prev[1]) * t];
-          if (dist(a[j], interp) < thr) { spike = false; break; }
+          if (dist(a[j], interp) < need) { spike = false; break; }
         }
-        if (spike) { for (let j = i; j < i + w; j++) { a[j] = null; if (flags) flags[j]++; } removed += w; }
+        if (spike && seen) { for (let j = i; j < i + w; j++) { if (!a[j]) continue; a[j] = null; if (flags) flags[j]++; removed++; } }
       }
     }
   }
@@ -195,22 +199,40 @@ export function rotatePt(p, tilt, W, H, inverse = false) {
 const BONES = [[11, 13], [13, 15], [12, 14], [14, 16], [23, 25], [25, 27], [24, 26], [26, 28], [27, 29], [27, 31], [28, 30], [28, 32], [29, 31], [30, 32]];
 function removeBoneOutliers(P, V, n, flags) {
   let removed = 0;
-  for (let pass = 0; pass < 2; pass++) for (const [a, b] of BONES) {
-    const ls = []; for (let i = 0; i < n; i++) if (P[a][i] && P[b][i]) ls.push(dist(P[a][i], P[b][i]));
-    if (ls.length < 8) continue;
-    const m = median(ls); if (!(m > 0)) continue;
-    const hi = b >= 29 ? 1.8 : 1.45, lo = b >= 29 ? 0.3 : 0.45;
+  const LEGB = new Set(['23-25', '25-27', '24-26', '26-28']);
+  for (let pass = 0; pass < 3; pass++) {
+    const med = BONES.map(([a, b]) => { const ls = []; for (let i = 0; i < n; i++) if (P[a][i] && P[b][i]) ls.push(dist(P[a][i], P[b][i])); return ls.length >= 8 ? median(ls) : NaN; });
+    let any = false;
     for (let i = 0; i < n; i++) {
-      if (!P[a][i] || !P[b][i]) continue;
-      const d = dist(P[a][i], P[b][i]);
-      if (d > hi * m || d < lo * m) { const k = V[a][i] + 0.3 < V[b][i] ? a : b; P[k][i] = null; flags[i] = 1; removed++; }
+      const cnt = new Map(); const bad = [];
+      BONES.forEach(([a, b], q) => {
+        const m = med[q]; if (!(m > 0) || !P[a][i] || !P[b][i]) return;
+        const leg = LEGB.has(a + '-' + b);
+        // Ober- und Unterschenkel bewegen sich von der Seite gesehen fast in der Bildebene: ihre Länge ändert sich kaum
+        const hi = b >= 29 ? 1.8 : leg ? 1.3 : 1.4, lo = b >= 29 ? 0.3 : leg ? 0.62 : 0.45;
+        const d = dist(P[a][i], P[b][i]);
+        if (d > hi * m || d < lo * m) { bad.push([a, b]); cnt.set(a, (cnt.get(a) || 0) + 1); cnt.set(b, (cnt.get(b) || 0) + 1); }
+      });
+      if (!bad.length) continue;
+      // Hängen zwei falsche Knochen am selben Gelenk (z. B. Knie), ist dieses Gelenk falsch – nicht seine Nachbarn
+      const kill = new Set();
+      for (const [a, b] of bad) {
+        if (kill.has(a) || kill.has(b)) continue;
+        const ca = cnt.get(a), cb = cnt.get(b);
+        let k = ca > cb ? a : cb > ca ? b : (V[a][i] + 0.3 < V[b][i] ? a : b);
+        if (k === 23 || k === 24 || k === 11 || k === 12) k = k === a ? b : a; // Rumpfpunkte sind die verlässlichsten
+        kill.add(k);
+      }
+      for (const k of kill) { P[k][i] = null; removed++; any = true; }
+      flags[i] = 1;
     }
+    if (!any) break;
   }
   // Arme: sehr unsichere Punkte des verdeckten Arms nicht verwenden
   for (const k of [13, 14, 15, 16]) for (let i = 0; i < n; i++) if (P[k][i] && V[k][i] < 0.35) { P[k][i] = null; removed++; }
   return removed;
 }
-export function prepareSeries(frames, W, H, fps, heightCm = 180, tilt = 0) {
+export function prepareSeries(frames, W, H, fps, heightCm = 180, tilt = 0, legSwap = null, longSpikes = false) {
   const n = frames.length;
   const { P, V } = rawPixels(frames, W, H);
   if (tilt) for (let k = 0; k < 33; k++) for (let i = 0; i < n; i++) if (P[k][i]) P[k][i] = rotatePt(P[k][i], tilt, W, H);
@@ -222,9 +244,14 @@ export function prepareSeries(frames, W, H, fps, heightCm = 180, tilt = 0) {
   const legPx = quantile(legs, 0.9) || 0.4 * H;
   const pxPerM = legPx / (0.49 * heightCm / 100);
   const flags = new Array(n).fill(0);
-  const swaps = fixSwaps(P, V, n, legPx, flags);
+  let swaps = fixSwaps(P, V, n, legPx, flags);
+  // Seiten-Korrektur aus dem Schrittrhythmus (siehe analyze): in diesen Bildern sind die Beine vertauscht erkannt
+  if (legSwap) for (let i = 0; i < n; i++) if (legSwap[i]) {
+    for (const [l, r] of LEG_PAIRS) { [P[l][i], P[r][i]] = [P[r][i], P[l][i]]; [V[l][i], V[r][i]] = [V[r][i], V[l][i]]; }
+    if (!legSwap[i - 1]) swaps++;
+  }
   // Schwelle: was sich zwischen zwei Bildern physikalisch nicht hin- und zurückbewegen kann
-  const spikes = removeSpikes(P, n, Math.max(0.06 * legPx, (12 * pxPerM) / fps), flags);
+  const spikes = removeSpikes(P, n, Math.max(0.06 * legPx, (12 * pxPerM) / fps), flags, longSpikes ? Math.max(2, Math.round(0.045 * fps)) : 2);
   const boneOut = removeBoneOutliers(P, V, n, flags);
   const sigma = 0.015 * legPx; // typische Messunsicherheit (~1,3 cm)
   const maxGap = Math.max(2, Math.round(0.08 * fps));
@@ -314,7 +341,7 @@ export function analyze(frames, opts) {
     let { x1, y1, x2, y2 } = opts.laneLine; if (x2 < x1) [x1, y1, x2, y2] = [x2, y2, x1, y1];
     tilt = Math.atan2((y2 - y1) * H, (x2 - x1) * W); tiltSource = 'lane';
   } else if (Number.isFinite(opts.tilt)) { tilt = opts.tilt; tiltSource = opts.tilt ? 'auto' : 'none'; }
-  const P = prepareSeries(frames, W, H, fps, opts.heightCm, tilt);
+  const P = prepareSeries(frames, W, H, fps, opts.heightCm, tilt, opts._legSwap || null, (opts._sidePass || 0) > 0);
   const at = (k, i) => P[k][i];
 
   // Laufrichtung: Zehen zeigen nach vorne (robust, auch bei mitschwenkender Kamera)
@@ -460,7 +487,10 @@ export function analyze(frames, opts) {
       raw.push([i, j]); i = j + 1;
     }
     const merged = [];
-    for (const sg of raw) { const last = merged[merged.length - 1]; if (last && sg[0] - last[1] - 1 <= gap) last[1] = sg[1]; else merged.push([...sg]); }
+    // Ein Fuß kann nicht innerhalb von ~70 ms abheben und wieder aufsetzen: so kurze Unterbrechungen desselben Fußes
+    // sind Erkennungsfehler (z. B. das Bein war kurz verdeckt) und werden überbrückt.
+    const gapSame = Math.max(gap, Math.round(0.07 * fps)), maxSpan = Math.round(0.3 * fps);
+    for (const sg of raw) { const last = merged[merged.length - 1]; const g = last ? sg[0] - last[1] - 1 : Infinity; if (last && (g <= gap || (g <= gapSame && sg[1] - last[0] + 1 <= maxSpan))) last[1] = sg[1]; else merged.push([...sg]); }
     // Ränder schärfen: Im Stütz ist der Fuß am tiefsten. Bilder, in denen er schon deutlich höher ist
     // (Fuß hebt ab, wandert aber relativ zur Hüfte noch nach hinten), gehören nicht mehr zum Kontakt.
     const refined = merged.map(([i0, i1]) => {
@@ -668,11 +698,46 @@ export function analyze(frames, opts) {
     return { i0, i1, td, to, side, partial: i0 === 0 || i1 === n - 1 || !!block, block: !!block, recovered: !!rec, manual: !!manual };
   });
 
+  // Seiten aus dem Rhythmus absichern: Beim Laufen wechseln sich die Füße immer ab. Daraus folgt für jedes Bild,
+  // welches Bein wo sein muss: Im Stütz ist der Stützfuß der tiefere, im Flug ist der Fuß des nächsten Kontakts vorne.
+  // Widerspricht die Erkennung dem über mehrere Bilder, hat sie die Beine vertauscht – dann werden die Beinpunkte
+  // in diesen Bildern getauscht und alles neu berechnet. So bleiben Farben, Kontakte und Winkel beim selben Bein.
+  if ((opts._sidePass || 0) < 2 && contacts.length >= 3 && opts.sideFix !== false) {
+    const ev = new Array(n).fill(0), clamp = (v) => Math.max(-3, Math.min(3, v));
+    const fl = contacts.map((c, k) => (contacts[k + 1] ? contacts[k + 1].i0 - c.i1 : NaN)), medFl = median(fl);
+    contacts.forEach((c, k) => {
+      const S = c.side, O = S === 'L' ? 'R' : 'L';
+      for (let i = c.i0; i <= c.i1; i++) { const a = footLow[S][i], b = footLow[O][i]; if (Number.isFinite(a) && Number.isFinite(b)) ev[i] = clamp((b - a) / tol); }
+      const nx = contacts[k + 1];
+      if (!nx || nx.side === S || !(fl[k] <= 1.8 * medFl + 1)) return; // Lücke/Hürde: keine Aussage
+      for (let i = c.i1 + 1; i < nx.i0; i++) { const a = relX[S][i], b = relX[nx.side][i]; if (Number.isFinite(a) && Number.isFinite(b)) ev[i] = clamp((a - b) / (0.25 * legPx)); }
+    });
+    // glatteste Folge „vertauscht / nicht vertauscht“ (Viterbi): ein Wechsel kostet, einzelne unklare Bilder kippen nichts
+    const lam = 2 + 0.03 * fps, c0 = new Array(n), c1 = new Array(n), b0 = new Array(n), b1 = new Array(n);
+    c0[0] = Math.max(0, ev[0]); c1[0] = Math.max(0, -ev[0]) + lam;
+    for (let i = 1; i < n; i++) {
+      const e0 = Math.max(0, ev[i]), e1 = Math.max(0, -ev[i]);
+      if (c0[i - 1] <= c1[i - 1] + lam) { c0[i] = c0[i - 1] + e0; b0[i] = 0; } else { c0[i] = c1[i - 1] + lam + e0; b0[i] = 1; }
+      if (c1[i - 1] <= c0[i - 1] + lam) { c1[i] = c1[i - 1] + e1; b1[i] = 1; } else { c1[i] = c0[i - 1] + lam + e1; b1[i] = 0; }
+    }
+    const mask = new Array(n).fill(false); let stt = c1[n - 1] < c0[n - 1] ? 1 : 0, cntSw = 0;
+    for (let i = n - 1; i >= 0; i--) { mask[i] = stt === 1; if (stt) cntSw++; if (i > 0) stt = stt ? b1[i] : b0[i]; }
+    if (cntSw >= n) { mask.fill(false); cntSw = 0; }
+    // Zweiter Durchgang immer: erst wenn die Seiten stimmen, lassen sich längere Aussetzer eines Beins sicher erkennen
+    if (cntSw > 0 || !opts._sidePass) {
+      const prev = opts._legSwap, comb = mask.map((m, i) => m !== !!(prev && prev[i]));
+      const res = analyze(frames, { ...opts, _zn: zn || null, _legSwap: comb, _sidePass: (opts._sidePass || 0) + 1 });
+      res.quality.sideFixed = (res.quality.sideFixed || 0) + cntSw;
+      return res;
+    }
+  }
+
   // Hilfsfunktionen pro Frame
-  const thigh = (s, i) => { const h = at(SIDES[s].hip, i), k = at(SIDES[s].knee, i); return h && k ? segFromDown(h, k, dir) : NaN; };
-  const knee = (s, i) => { const h = at(SIDES[s].hip, i), k = at(SIDES[s].knee, i), a = at(SIDES[s].ank, i); return h && k && a ? jointAngle(h, k, a) : NaN; };
-  const upperArm = (s, i) => { const sh = at(SIDES[s].sh, i), e = at(SIDES[s].el, i); return sh && e ? segFromDown(sh, e, dir) : NaN; };
-  const elbow = (s, i) => { const sh = at(SIDES[s].sh, i), e = at(SIDES[s].el, i), w = at(SIDES[s].wr, i); return sh && e && w ? jointAngle(sh, e, w) : NaN; };
+  const rob = (fn) => (fps >= 90 ? (s, i) => { const v = fn(s, i); return Number.isFinite(v) ? median([fn(s, i - 1), v, fn(s, i + 1)]) : v; } : fn);
+  const thigh = rob((s, i) => { const h = at(SIDES[s].hip, i), k = at(SIDES[s].knee, i); return h && k ? segFromDown(h, k, dir) : NaN; });
+  const knee = rob((s, i) => { const h = at(SIDES[s].hip, i), k = at(SIDES[s].knee, i), a = at(SIDES[s].ank, i); return h && k && a ? jointAngle(h, k, a) : NaN; });
+  const upperArm = rob((s, i) => { const sh = at(SIDES[s].sh, i), e = at(SIDES[s].el, i); return sh && e ? segFromDown(sh, e, dir) : NaN; });
+  const elbow = rob((s, i) => { const sh = at(SIDES[s].sh, i), e = at(SIDES[s].el, i), w = at(SIDES[s].wr, i); return sh && e && w ? jointAngle(sh, e, w) : NaN; });
   const trunk = (i) => { const sm = mid(at(LM.lSh, i), at(LM.rSh, i)); return sm && hipMid[i] ? segFromUp(hipMid[i], sm, dir) : NaN; };
   const cm = (px) => (Number.isFinite(mPerPx) ? px * mPerPx * 100 : NaN);
   const other = (s) => (s === 'L' ? 'R' : 'L');
