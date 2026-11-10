@@ -1070,6 +1070,26 @@ export function analyze(frames, opts) {
     });
   }
 
+  // ---------- Rhythmus-Prüfung ----------
+  // Laufschritte kommen gleichmäßig: Schrittdauer, Kontakt und Flug ändern sich von Schritt zu Schritt nur wenig
+  // (außer an der Hürde). Ein Schritt, der deutlich aus der Reihe seiner Nachbarn fällt, ist fast immer falsch erkannt –
+  // er bleibt sichtbar, zählt aber nicht in die Auswertung.
+  if (!forced) {
+    const normal = (x) => x.include && !x.hurdleStep && !x.clearance && !x.partial;
+    const loc = (key, k) => { const v = []; for (let j = Math.max(0, k - 4); j <= Math.min(steps.length - 1, k + 4); j++) if (j !== k && normal(steps[j]) && Number.isFinite(steps[j][key])) v.push(steps[j][key]); return v.length >= 3 ? median(v) : NaN; };
+    const out = [];
+    steps.forEach((x, k) => {
+      if (!normal(x)) return;
+      const mT = loc('stepTimeMs', k), mC = loc('contactMs', k), mF = loc('flightMs', k), why = [];
+      if (Number.isFinite(mT) && Number.isFinite(x.stepTimeMs) && Math.abs(x.stepTimeMs - mT) > 0.22 * mT) why.push('Schrittdauer');
+      if (Number.isFinite(mC) && Number.isFinite(x.contactMs) && Math.abs(x.contactMs - mC) > Math.max(25, 0.35 * mC)) why.push('Kontakt');
+      if (Number.isFinite(mF) && Number.isFinite(x.flightMs) && Math.abs(x.flightMs - mF) > Math.max(35, 0.45 * mF)) why.push('Flug');
+      if (why.length) out.push([x, why]);
+    });
+    // nur wenn die Mehrheit der Schritte zusammenpasst – sonst ist der ganze Lauf unsicher und es gibt keinen verlässlichen Rhythmus
+    if (out.length <= 0.4 * steps.filter(normal).length) for (const [x, why] of out) { x.include = false; x.rhythmOut = true; x.flags.push('passt nicht zum Rhythmus (' + why.join(', ') + ')'); }
+  }
+
   // Bildqualität
   const vis = [];
   for (const f of frames) if (f && f.lm) vis.push(mean(f.lm.map((p) => p[2] ?? 1)));
@@ -1328,4 +1348,34 @@ export function correlate(xs, ys) {
   if (!sxx || !syy) return { n, r: NaN, slope: NaN, intercept: NaN };
   const slope = sxy / sxx;
   return { n, r: sxy / Math.sqrt(sxx * syy), slope, intercept: my - slope * mx };
+}
+
+// Tempoverlauf für die Anzeige: offensichtliche Ausreißer entfernen und – wenn Hürden erkannt sind und ihr Abstand bekannt ist –
+// so skalieren, dass die Strecke von Hürde zu Hürde genau dem Abstand entspricht. Das Tempo aus dem Bild allein stimmt nur,
+// wenn genau von der Seite gefilmt wird; läuft die Person schräg zur Kamera (Kurve, weit weg), ist es zu niedrig.
+export function speedCurve(result, spacingM = 0) {
+  const c = result.curves; if (!c || !c.ok) return { v: [], source: 'none' };
+  const n = c.v.length, fps = result.fps, v = c.v.slice(), w = Math.max(2, Math.round(0.4 * fps));
+  const stride = Math.max(1, Math.floor(w / 12));
+  for (let i = 0; i < n; i++) {
+    if (!Number.isFinite(c.v[i])) continue;
+    const a = []; for (let j = Math.max(0, i - w); j <= Math.min(n - 1, i + w); j += stride) if (Number.isFinite(c.v[j])) a.push(c.v[j]);
+    const m = median(a); if (Number.isFinite(m) && m > 0.5 && (c.v[i] < 0.55 * m || c.v[i] > 1.6 * m)) v[i] = NaN;
+  }
+  let last = -1; for (let i = 0; i < n; i++) if (Number.isFinite(v[i])) { if (last >= 0 && i - last > 1) for (let j = last + 1; j < i; j++) v[j] = v[last] + (v[i] - v[last]) * (j - last) / (i - last); last = i; }
+  const hs = (result.hurdles || []).filter((h) => h.found && Number.isFinite(h.landingIndex)).sort((a, b) => a.landingIndex - b.landingIndex);
+  if (!(spacingM > 0) || hs.length < 2) return { v, source: 'video' };
+  const fac = new Array(n).fill(NaN), fs = [];
+  for (let k = 1; k < hs.length; k++) {
+    const a = hs[k - 1].landingIndex, b = hs[k].landingIndex; let I = 0, cnt = 0;
+    for (let i = a; i < b; i++) if (Number.isFinite(v[i])) { I += v[i] / fps; cnt++; }
+    const T = (b - a) / fps; if (!(T > 0)) continue;
+    if (cnt < 0.5 * (b - a) || !(I > 0)) { for (let i = a; i < b; i++) v[i] = spacingM / T; fs.push([a, b, 1]); continue; } // Kurve hier unbrauchbar: Durchschnittstempo
+    const f = Math.max(0.4, Math.min(5, spacingM / (I * (b - a) / cnt))); fs.push([a, b, f]);
+  }
+  if (!fs.length) return { v, source: 'video' };
+  for (const [a, b, f] of fs) for (let i = a; i < b; i++) fac[i] = f;
+  for (let i = 0; i < fs[0][0]; i++) fac[i] = fs[0][2];
+  for (let i = fs[fs.length - 1][1]; i < n; i++) fac[i] = fs[fs.length - 1][2];
+  return { v: v.map((x, i) => (Number.isFinite(x) && Number.isFinite(fac[i]) ? x * fac[i] : x)), source: 'hurdles', factor: median(fs.map((q) => q[2])) };
 }

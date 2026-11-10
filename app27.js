@@ -1,4 +1,4 @@
-import { analyze, summarize, summarizeLR, transitionStep, hints, correlate, METRICS, HURDLE_METRICS, median, PHASES, REF, CATEGORIES, suggestPhase, evaluate, extractStride, rotatePt } from './analysis6.js';
+import { speedCurve, analyze, summarize, summarizeLR, transitionStep, hints, correlate, METRICS, HURDLE_METRICS, median, PHASES, REF, CATEGORIES, suggestPhase, evaluate, extractStride, rotatePt } from './analysis7.js';
 import { FigurePlayer } from './figure2.js';
 
 // ======================= Helfer =======================
@@ -851,12 +851,17 @@ function pickPose(poses, prev, target) {
   let best = null, bs = Infinity;
   for (const p of poses) {
     const b = bbox(p); let s;
-    if (prev) { const pb = bbox(prev); s = Math.hypot(b.cx - pb.cx, b.cy - pb.cy) + Math.abs(b.h - pb.h); }
+    if (prev) {
+      // Eine Person springt nicht: erwartet wird sie dort, wohin sie sich zuletzt bewegt hat, und etwa gleich groß
+      const pb = bbox(prev), lost = prev._lost || 0;
+      if (b.h > 2.2 * pb.h || b.h < 0.4 * pb.h) continue;
+      s = Math.hypot(b.cx - (pb.cx + (prev._vx || 0) * (lost + 1)), b.cy - (pb.cy + (prev._vy || 0) * (lost + 1))) + Math.abs(b.h - pb.h);
+    }
     else if (target) { const inside = target.x >= b.x0 && target.x <= b.x1 && target.y >= b.y0 && target.y <= b.y1; s = (inside ? 0 : 1) + Math.hypot(b.cx - target.x, b.cy - target.y); }
     else s = -b.h;
     if (s < bs) { bs = s; best = p; }
   }
-  if (prev && bs > 0.25) return null;
+  if (prev) { const pb = bbox(prev); if (bs > Math.min(0.25, Math.max(0.035, 0.9 * pb.h) * (1 + 0.4 * (prev._lost || 0)))) return null; }
   return best;
 }
 const CONN = [[11, 12, 'c'], [11, 23, 'L'], [12, 24, 'R'], [23, 24, 'c'], [11, 13, 'L'], [13, 15, 'L'], [12, 14, 'R'], [14, 16, 'R'], [23, 25, 'L'], [25, 27, 'L'], [27, 29, 'L'], [29, 31, 'L'], [27, 31, 'L'], [24, 26, 'R'], [26, 28, 'R'], [28, 30, 'R'], [30, 32, 'R'], [28, 32, 'R']];
@@ -1035,7 +1040,8 @@ async function detectFrames(lmk, i0, n, fileFps, target, ctx, canvas, prog, targ
       const b = bbox(prev);
       if (b.h < 0.85) { // Ausschnitt um die Person: das Modell sieht sie groß und setzt Füße und Knie genauer
         const side = Math.max(b.h * H, (b.x1 - b.x0) * W) * 1.8;
-        const reg = regionAt(b.cx, b.cy, Math.max(side, 0.2 * H)); let pr = pickPose(detect(reg), prev, null);
+        const lostN = (prev._lost || 0) + 1;
+        const reg = regionAt(Math.max(0, Math.min(1, b.cx + (prev._vx || 0) * lostN)), Math.max(0, Math.min(1, b.cy + (prev._vy || 0) * lostN)), Math.max(side, 0.2 * H) * (1 + 0.15 * Math.min(4, lostN - 1))); let pr = pickPose(detect(reg), prev, null);
         // Füße unsicher oder Person verloren: noch einmal mit aufgehelltem Bild. Bringt das über viele Bilder nichts, wird es gelassen.
         if ((!pr || footVis(pr) < 0.5) && !(enh.tried > 40 && enh.used < 0.1 * enh.tried)) {
           enh.tried++; const p2 = pickPose(detect(reg, true), prev, null);
@@ -1057,11 +1063,14 @@ async function detectFrames(lmk, i0, n, fileFps, target, ctx, canvas, prog, targ
   let prev = null, anchor = null, done = 0; const t0 = performance.now();
   for (const k of order) {
     if (state.cancel) break;
-    if (k === kT - 1) { prev = anchor; state.tsBase += 1e5; } // Rückwärts-Durchgang startet bei der angetippten Person
+    if (k === kT - 1) { prev = anchor; if (prev) { prev._vx = 0; prev._vy = 0; prev._lost = 0; } state.tsBase += 1e5; } // Rückwärts-Durchgang startet bei der angetippten Person
     await seekTo(times[k]);
     let pose = findPose(prev, prev ? null : target);
     if (!pose && prev && !target && done < 3) pose = findPose(null, null);
-    if (pose) { prev = pose; if (!anchor && k >= kT) anchor = pose; }
+    if (pose) {
+      if (prev && prev !== pose) { const a = bbox(prev), b = bbox(pose), g = (prev._lost || 0) + 1; pose._vx = 0.6 * (prev._vx || 0) + 0.4 * (b.cx - a.cx) / g; pose._vy = 0.6 * (prev._vy || 0) + 0.4 * (b.cy - a.cy) / g; }
+      pose._lost = 0; prev = pose; if (!anchor && k >= kT) anchor = pose;
+    } else if (prev) prev._lost = (prev._lost || 0) + 1;
     const lm = pose ? pose.map((p) => [p.x, p.y, p.visibility ?? 1]) : null;
     frames[k] = { lm }; done++;
     { let fy = NaN; if (lm) { const ys = [29, 30, 31, 32].map((j) => lm[j]).filter((q) => q && q[2] > 0.3).map((q) => q[1]); if (ys.length) fy = Math.max(...ys); } lanes[k] = detectLane(fy); }
@@ -1178,7 +1187,7 @@ const RES_GROUPS = {
   overview: { label: 'Überblick', panes: [['overview', 'Überblick']] },
   video: { label: 'Im Video', panes: [['check', 'Werte prüfen'], ['edit', 'Schritte korrigieren']] },
   numbers: { label: 'Zahlen', panes: [['areas', 'Bereiche'], ['curves', 'Verlauf'], ['steps', 'Tabelle']] },
-  pics: { label: 'Bilder', panes: [['kino', 'Kinogramm'], ['figure', 'Figur']] },
+  pics: { label: 'Bilder', panes: [['kino', 'Kinogramm']] },
 };
 const RES_INFO = {
   overview: 'Das Wichtigste aus deinem Lauf in Kürze.',
@@ -1332,9 +1341,13 @@ function hurdleSplits(r) {
   return out;
 }
 const hSpace = () => { try { return parseNum(localStorage.getItem('sprintanalyse.hspace')) || 0; } catch { return 0; } };
+function hSpaceFor(r) {
+  const m = hSpace(); if (m > 0) return m;
+  const sp = r ? hurdleSplits(r) : []; return sp.length && median(sp.map((x) => x.t)) > 2.8 ? 35 : 0;
+}
 function splitsHtml(r) {
   const sp = hurdleSplits(r); if (!sp.length) return '';
-  const m = hSpace(), tMax = Math.max(...sp.map((x) => x.t));
+  const m = hSpaceFor(r), tMax = Math.max(...sp.map((x) => x.t));
   return `<h3 class="sect" style="font-size:20px">Von Hürde zu Hürde</h3>
     <div class="splits">${sp.map((x) => `<div class="split-row"><b>H${x.from} → H${x.to}</b><span class="bar"><i style="width:${Math.round(100 * x.t / tMax)}%"></i></span><span class="tm num">${fmt(x.t, 2)} s</span><span class="meta">${x.steps} Schritte${m > 0 ? ` · ${fmt(m / x.t, 2)} m/s · ${fmt(m / x.t * 3.6, 1)} km/h` : ''}</span></div>`).join('')}</div>
     <label class="f" style="max-width:240px;margin-top:10px">Hürdenabstand in m (für das Tempo)<input id="hSpaceIn" inputmode="decimal" list="hSpaceList" placeholder="z. B. 35" value="${m > 0 ? String(m).replace('.', ',') : ''}"></label>
@@ -2097,9 +2110,11 @@ function renderCurves() {
   const c = r.curves, o = state.analysisOpts;
   $('curvesNote').innerHTML = !c || !c.ok ? '<div class="notice warn">Für den Verlauf wird ein Maßstab gebraucht – Körpergröße eintragen.</div>' : o.fps < 100 ? `<div class="notice">Bei ${o.fps} fps sind die Kurven grob, besonders die Kraft. Mit Zeitlupe (120/240 fps) werden sie deutlich genauer.</div>` : '';
   if (!c || !c.ok) return;
+  const sc = speedCurve(r, hSpaceFor(r));
+  $('curvesNote').innerHTML += sc.source === 'hurdles' ? `<div class="notice">Tempo auf den Hürdenabstand (${fmt(hSpaceFor(r), 2)} m) geeicht: Die Strecke von Hürde zu Hürde stimmt, egal wie weit weg oder wie schräg gefilmt wurde.</div>` : '<div class="notice">Tempo nur aus dem Bild geschätzt. Es stimmt, wenn genau von der Seite gefilmt ist. Mit zwei erkannten Hürden und dem Hürdenabstand wird es geeicht.</div>';
   const stp = Math.max(1, Math.floor(c.t.length / 400)), idx = c.t.map((_, i) => i).filter((i) => i % stp === 0);
   const bands = r.contacts.map((k) => ({ a: k.i0 / r.fps, b: k.i1 / r.fps, color: SIDECOL[k.side] }));
-  $('chartV').innerHTML = lineChart({ xs: idx.map((i) => c.t[i]), series: [{ ys: idx.map((i) => c.v[i]), color: 'var(--track)' }], bands, yLabel: 'm/s', digits: 1 });
+  $('chartV').innerHTML = lineChart({ xs: idx.map((i) => c.t[i]), series: [{ ys: idx.map((i) => sc.v[i]), color: 'var(--track)' }], bands, yLabel: 'm/s', digits: 1 });
   $('chartF').innerHTML = lineChart({ xs: idx.map((i) => c.t[i]), series: [{ ys: idx.map((i) => (Number.isFinite(c.f[i]) ? Math.max(-0.5, Math.min(6, c.f[i])) : NaN)), color: 'var(--info)' }, { ys: idx.map(() => 1), color: 'var(--muted)', w: 1, dash: true }], bands, yLabel: 'Körpergewichte (gestrichelt = 1, Stehen)', digits: 1 });
   const st = r.steps.filter((x) => x.include);
   const bar = (key, title, digits) => {
