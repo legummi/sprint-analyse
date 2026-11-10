@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>Sprint-Analyse</title>
+<style>
+  :root {
+    /* Idee: schwarze Bühne wie in Apple Fitness. Inhalte liegen auf angehobenen Flächen,
+       alles zum Bedienen schwebt als Glas darüber. Große Zahlen in runder Schrift. */
+    --bg: #000; --card: #1C1C1E; --card2: #2C2C2E; --card3: #3A3A3C;
+    --ink: #FFFFFF; --ink2: rgba(235,235,245,.80); --muted: rgba(235,235,245,.56); --sep: rgba(255,255,255,.10);
+    --fill: rgba(120,120,128,.26); --fill2: rgba(120,120,128,.40);
+    --track: #FF5A2E; --track-soft: rgba(255,90,46,.18); --track-ink: #FFFFFF;
+    --lane: #0A84FF; --lane-deep: #0060DF; --info: #0A84FF;
+    --good: #30D158; --near: #FFB340; --off: #FF453A;
+    --left: #FF6A3D; --right: #3B9BFF;
+    --glass-bg: linear-gradient(180deg, rgba(255,255,255,.16), rgba(255,255,255,.07));
+    --glass-line: rgba(255,255,255,.22);
+    --glass-shadow: inset 0 1px 0 rgba(255,255,255,.28), inset 0 -1px 0 rgba(255,255,255,.05), 0 10px 30px rgba(0,0,0,.35);
+    --glass-blur: blur(26px) saturate(190%);
+    --r-lg: 22px; --r-md: 16px; --r-sm: 12px;
+    --text: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, "Segoe UI", Roboto, sans-serif;
+    --display: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, "Segoe UI", Roboto, sans-serif;
+    --round: var(--display);
+    --spring: cubic-bezier(.34,1.56,.64,1);
+    --ease: cubic-bezier(.2,.8,.2,1);
+    --safe-b: env(safe-area-inset-bottom, 0px); --safe-t: env(safe-area-inset-top, 0px);
+    color-scheme: dark;
+  }
+  [hidden] { display: none !important; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.42 var(--text); -webkit-font-smoothing: antialiased; overflow-x: clip; }
+  body { padding-bottom: calc(104px + var(--safe-b)); min-height: 100%; background: transparent; }
+  #kinoSteps { flex-wrap: nowrap; overflow-x: auto; }
+  /* weiches Licht hinter dem Glas */
+  body::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background: radial-gradient(60% 34% at 12% -4%, rgba(255,90,46,.26), transparent 70%), radial-gradient(55% 30% at 100% 2%, rgba(10,132,255,.20), transparent 70%); }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { touch-action: manipulation; }
+  :focus-visible { outline: 3px solid color-mix(in srgb, var(--info) 70%, transparent); outline-offset: 2px; border-radius: 10px; }
+  a { color: var(--info); text-decoration: none; }
+  .num { font-family: var(--display); font-variant-numeric: tabular-nums; }
+  main, .split > *, .card, .pane { min-width: 0; }
+  canvas, img, video, svg { max-width: 100%; }
+  .glass { background: var(--glass-bg); border: .5px solid var(--glass-line); box-shadow: var(--glass-shadow); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); }
+
+  /* ---------- Kopf ---------- */
+  .top { position: sticky; top: 0; z-index: 20; padding: calc(8px + var(--safe-t)) 16px 8px; background: rgba(0,0,0,.55); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); border-bottom: .5px solid var(--sep); }
+  .top-in { max-width: 980px; margin: 0 auto; display: flex; align-items: center; gap: 10px; min-height: 40px; }
+  .back { display: none; border: 0; background: var(--fill); color: var(--ink); font-size: 15px; font-weight: 600; padding: 8px 14px 8px 10px; border-radius: 99px; cursor: pointer; }
+  .back.on { display: inline-flex; align-items: center; gap: 6px; }
+  .back svg { width: 9px; height: 15px; }
+  .top h1 { margin: 0; font-size: 17px; font-weight: 600; flex: 1; text-align: left; letter-spacing: -.01em; }
+  .store { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; padding: 6px 10px; border-radius: 99px; background: var(--fill); }
+  .store i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); display: inline-block; }
+  .store.cloud i { background: var(--good); } .store.local i { background: var(--near); }
+  main { max-width: 980px; margin: 0 auto; padding: 6px 16px 24px; }
+  .large { font-family: var(--display); font-size: 34px; line-height: 1.08; font-weight: 700; letter-spacing: -.01em; margin: 8px 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 18px; }
+
+  /* ---------- Tab-Leiste: schwebende Glas-Kapsel ---------- */
+  .tabbar { position: fixed; left: 50%; bottom: calc(10px + var(--safe-b)); z-index: 30; transform: translateX(-50%); width: min(430px, calc(100% - 24px)); display: flex; gap: 2px; padding: 5px; border-radius: 34px;
+    background: linear-gradient(180deg, rgba(60,60,64,.62), rgba(28,28,30,.62)); border: .5px solid var(--glass-line); box-shadow: var(--glass-shadow); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); }
+  .tabbar button { flex: 1 1 0; min-width: 0; border: 0; background: none; color: var(--ink2); display: flex; flex-direction: column; align-items: center; gap: 1px; font-size: 10.5px; font-weight: 600; padding: 6px 0 5px; cursor: pointer; border-radius: 28px; transition: transform .18s var(--spring), color .2s, background .25s; }
+  .tabbar button svg { width: 25px; height: 25px; }
+  .tabbar button.on { color: var(--track); background: rgba(255,255,255,.13); box-shadow: inset 0 1px 0 rgba(255,255,255,.14); }
+  .tabbar button:active { transform: scale(.92); }
+
+  /* ---------- Bausteine ---------- */
+  .card { background: var(--card); border-radius: var(--r-lg); padding: 18px; margin-bottom: 14px; }
+  .card.flat { background: var(--card2); }
+  .card h2 { font-family: var(--display); font-size: 22px; font-weight: 700; margin: 0 0 4px; }
+  .card h3 { font-size: 15px; margin: 18px 0 8px; color: var(--ink2); font-weight: 600; }
+  .hint { color: var(--muted); font-size: 14px; }
+  .small { font-size: 13px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+  .grow { flex: 1; }
+  .stack { display: grid; gap: 12px; }
+  .btn { --b: var(--fill); display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; background: var(--b); color: var(--ink); padding: 13px 20px; border-radius: 99px; font-weight: 600; font-size: 16px; cursor: pointer; transition: transform .16s var(--spring), filter .2s, background .2s; user-select: none; -webkit-user-select: none; }
+  .btn:active { transform: scale(.96); filter: brightness(.9); }
+  .btn.primary { --b: var(--track); color: var(--track-ink); box-shadow: inset 0 1px 0 rgba(255,255,255,.28), 0 8px 20px -10px var(--track); }
+  .btn.tint { --b: var(--track-soft); color: #FF8A66; }
+  .btn.ghost { --b: transparent; color: var(--track); padding: 10px 8px; }
+  .btn.sm { padding: 9px 14px; font-size: 14px; }
+  .btn.block { width: 100%; }
+  .btn:disabled { opacity: .4; pointer-events: none; }
+  .icon-btn { width: 44px; height: 44px; padding: 0; border-radius: 50%; }
+  .btn.armed { --b: var(--track); color: var(--track-ink); animation: armed 1.3s ease-in-out infinite; }
+  .btn.set { box-shadow: inset 0 0 0 2px var(--track); }
+  .btn.flash { animation: flash .6s ease-out; }
+  @keyframes armed { 0%,100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--track) 55%, transparent); } 50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--track) 0%, transparent); } }
+  @keyframes flash { 0% { background: var(--good); color: #fff; transform: scale(1.05); } 100% { background: var(--b); } }
+  label.f { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); min-width: 140px; flex: 1; }
+  input, select, textarea { background: var(--fill); border: 0; border-radius: 12px; padding: 12px 14px; width: 100%; font-size: 16px; outline: none; transition: box-shadow .2s; }
+  input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--track) 40%, transparent); }
+  select option { color: #000; }
+  textarea { min-height: 76px; resize: vertical; }
+  input[type=range] { -webkit-appearance: none; appearance: none; background: transparent; padding: 10px 0; flex: 1; min-width: 60px; }
+  input[type=range]:focus { box-shadow: none; }
+  input[type=range]::-webkit-slider-runnable-track { height: 6px; background: var(--fill2); border-radius: 3px; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 26px; height: 26px; border-radius: 50%; background: #fff; margin-top: -10px; box-shadow: 0 2px 6px rgba(0,0,0,.4), 0 0 0 .5px rgba(0,0,0,.1); }
+  input[type=range]::-moz-range-track { height: 6px; background: var(--fill2); border-radius: 3px; }
+  input[type=range]::-moz-range-thumb { width: 24px; height: 24px; border-radius: 50%; background: #fff; border: 0; box-shadow: 0 2px 6px rgba(0,0,0,.4); }
+  input[type=checkbox] { width: 20px; height: 20px; padding: 0; accent-color: var(--track); flex: none; }
+
+  /* Segmented Control mit gleitender Markierung */
+  .seg { position: relative; display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; background: var(--fill); border-radius: 12px; padding: 2px; isolation: isolate; }
+  .seg::before { content: ""; position: absolute; z-index: -1; top: 2px; bottom: 2px; left: calc(2px + var(--i, 0) * (100% - 4px) / var(--n, 1)); width: calc((100% - 4px) / var(--n, 1)); background: #636366; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.14); transition: left .32s var(--spring); }
+  .seg button { border: 0; background: none; padding: 8px 12px; font-size: 14px; font-weight: 500; color: var(--ink); cursor: pointer; white-space: nowrap; border-radius: 10px; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .seg button.on { font-weight: 600; }
+  .seg.full { display: grid; width: 100%; }
+  .seg.main button { font-weight: 600; padding: 9px 6px; }
+  .seg.sub { margin-top: 8px; background: transparent; }
+  .seg.sub::before { background: var(--track-soft); box-shadow: none; }
+  .seg.sub button.on { color: #FF8A66; }
+
+  .chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding: 2px; margin: 0 -2px; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chips.wrap { flex-wrap: wrap; overflow: visible; }
+  .chip { flex: none; border: 0; background: var(--card2); color: var(--ink); padding: 8px 14px; border-radius: 99px; font-size: 14px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: transform .16s var(--spring), background .2s; }
+  .chip:active { transform: scale(.95); }
+  .chip.on { background: var(--ink); color: #000; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+  .d-good { background: var(--good); } .d-near { background: var(--near); } .d-off { background: var(--off); } .d-none { background: var(--muted); opacity: .5; }
+  .t-good { color: var(--good); } .t-near { color: var(--near); } .t-off { color: var(--off); } .t-none { color: var(--muted); }
+  .notice { padding: 12px 14px; border-radius: 16px; background: color-mix(in srgb, var(--info) 16%, var(--card)); font-size: 14px; margin: 10px 0; }
+  .notice.warn { background: color-mix(in srgb, var(--near) 16%, var(--card)); }
+  .notice.err { background: color-mix(in srgb, var(--off) 18%, var(--card)); }
+  .list { background: var(--card); border-radius: var(--r-lg); overflow: hidden; }
+  .li { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border: 0; border-bottom: .5px solid var(--sep); background: none; width: 100%; text-align: left; cursor: pointer; transition: background .15s; color: var(--ink); }
+  .li:last-child { border-bottom: 0; }
+  .li:active { background: var(--card2); }
+  .li .chev { color: var(--muted); font-size: 20px; }
+  .li.plain { background: var(--card); border-radius: var(--r-md); }
+  .empty { text-align: center; color: var(--muted); padding: 36px 16px; }
+  .empty b { display: block; color: var(--ink); font-size: 18px; margin-bottom: 6px; }
+
+  /* ---------- Ansichten ---------- */
+  .view { display: none; } .view.on { display: block; animation: appear .3s var(--ease); }
+  .screen { display: none; } .screen.on { display: block; animation: appear .3s var(--ease); }
+  .pane { display: none; } .pane.on { display: block; animation: appear .26s var(--ease); }
+  @keyframes appear { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+  /* ---------- Start ---------- */
+  .claim { font-family: var(--display); font-size: clamp(36px, 10.5vw, 46px); line-height: 1.02; font-weight: 800; letter-spacing: -.02em; margin: 14px 0 18px; }
+  .claim span { color: var(--track); }
+  .cta { position: relative; overflow: hidden; display: flex; align-items: center; gap: 16px; padding: 20px; border-radius: 26px; color: #fff; cursor: pointer; transition: transform .16s var(--spring);
+    background: linear-gradient(135deg, #FF7B47 0%, #FF4A26 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,.4), inset 0 -1px 0 rgba(0,0,0,.12), 0 18px 40px -18px rgba(255,90,46,.8); }
+  .cta::after { content: ""; position: absolute; right: -40px; top: -60px; width: 220px; height: 220px; border-radius: 50%; background: radial-gradient(closest-side, rgba(255,255,255,.28), transparent); pointer-events: none; }
+  .cta:active { transform: scale(.98); } .cta.over { outline: 3px solid #fff; outline-offset: 3px; }
+  .cta-ic { width: 54px; height: 54px; flex: none; border-radius: 18px; background: rgba(255,255,255,.2); border: .5px solid rgba(255,255,255,.4); box-shadow: inset 0 1px 0 rgba(255,255,255,.4); display: grid; place-items: center; }
+  .cta-tx { display: flex; flex-direction: column; gap: 2px; position: relative; } .cta-tx b { font-family: var(--display); font-size: 20px; font-weight: 700; } .cta-tx span { font-size: 13.5px; opacity: .9; }
+  .tiles2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 10px 0 24px; }
+  .tile2 { border: 0; background: var(--card); color: var(--ink); border-radius: 20px; padding: 14px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-height: 92px; cursor: pointer; text-align: left; font: inherit; transition: transform .16s var(--spring); }
+  .tile2:active { transform: scale(.97); }
+  .tile2 svg { color: var(--track); }
+  .tile2 b { font-size: 15px; font-weight: 600; }
+  .sect-row { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+  .sect2 { margin: 0; font-family: var(--display); font-size: 22px; font-weight: 700; }
+  .linkbtn { border: 0; background: none; color: var(--track); font-weight: 600; font-size: 15px; cursor: pointer; padding: 6px 2px; }
+  .recent { display: grid; gap: 8px; }
+  .rrow { display: flex; align-items: center; gap: 12px; background: var(--card); border: 0; border-radius: 18px; padding: 10px 14px 10px 10px; color: var(--ink); text-align: left; cursor: pointer; font: inherit; width: 100%; transition: transform .16s var(--spring); }
+  .rrow:active { transform: scale(.98); }
+  .rrow img, .rrow .ph { width: 60px; height: 46px; border-radius: 12px; object-fit: cover; background: var(--card2); flex: none; }
+  .rrow .t { font-weight: 600; font-size: 15px; } .rrow .m { font-size: 12.5px; color: var(--muted); }
+  .rrow .tm { margin-left: auto; font-family: var(--display); font-weight: 700; font-size: 21px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .howto { list-style: none; counter-reset: s; padding: 0; margin: 0; display: grid; background: var(--card); border-radius: var(--r-lg); overflow: hidden; }
+  .howto li { counter-increment: s; display: grid; grid-template-columns: 32px 1fr; column-gap: 12px; padding: 14px 16px; border-bottom: .5px solid var(--sep); }
+  .howto li:last-child { border-bottom: 0; }
+  .howto li::before { content: counter(s); grid-row: span 2; width: 30px; height: 30px; border-radius: 50%; background: var(--track-soft); color: #FF8A66; font-family: var(--display); font-weight: 700; font-size: 17px; display: grid; place-items: center; }
+  .howto b { font-size: 15px; } .howto span { color: var(--muted); font-size: 14px; }
+
+  /* ---------- Video-Bühne ---------- */
+  .stage { position: relative; background: #000; border-radius: 20px; overflow: hidden; }
+  .stage video, .stage canvas.main { display: block; width: 100%; height: auto; }
+  .stage canvas.main { touch-action: pan-y; cursor: ew-resize; }
+  .stage canvas.ovl { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .stage .tap { position: absolute; inset: 0; display: block; touch-action: none; cursor: ew-resize; }
+  .stage .tap.place { cursor: crosshair; }
+  #setupStage { margin: 0 auto; max-width: 100%; }
+  #setupStage video { width: 100%; height: 100%; object-fit: fill; }
+  #edCanvas { touch-action: none; }
+  .stage .badge { position: absolute; left: 10px; top: 10px; max-width: calc(100% - 66px); color: #fff; font-size: 13px; font-weight: 600; padding: 7px 12px; border-radius: 99px; pointer-events: none;
+    background: rgba(30,30,32,.55); border: .5px solid var(--glass-line); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); }
+  .hud { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 4; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; color: #fff; font-family: var(--display); font-weight: 700; font-size: 16px; font-variant-numeric: tabular-nums; padding: 8px 14px; border-radius: 99px; pointer-events: none;
+    background: rgba(30,30,32,.55); border: .5px solid var(--glass-line); box-shadow: var(--glass-shadow); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); }
+  .hud.busy::before { content: ""; width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255,255,255,.3); border-top-color: #fff; animation: spin .8s linear infinite; }
+  .hud.busy { font-family: var(--text); font-weight: 600; font-size: 14px; pointer-events: auto; cursor: pointer; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loupe { position: fixed; width: 120px; height: 120px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 6px 20px rgba(0,0,0,.45); pointer-events: none; display: none; z-index: 96; background: #000; }
+  .vload { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 5; display: inline-flex; align-items: center; gap: 10px; border: .5px solid var(--glass-line); color: #fff; font-weight: 600; font-size: 15px; padding: 12px 18px; border-radius: 99px; cursor: pointer; white-space: nowrap;
+    background: rgba(30,30,32,.6); box-shadow: var(--glass-shadow); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); }
+  .vload span { width: 26px; height: 26px; border-radius: 50%; background: #fff; color: #000; display: grid; place-items: center; padding-left: 2px; }
+  .fsbtn { position: absolute; right: 10px; top: 10px; z-index: 3; width: 40px; height: 40px; border-radius: 50%; border: .5px solid var(--glass-line); color: #fff; display: grid; place-items: center; cursor: pointer; padding: 0;
+    background: rgba(30,30,32,.55); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); }
+  .fsbtn .i-min { display: none; }
+
+  /* Transport und Zeitleisten */
+  .transport { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .tbtn { width: 44px; height: 44px; flex: none; border: 0; border-radius: 50%; background: var(--fill); color: var(--ink); display: grid; place-items: center; cursor: pointer; padding: 0; transition: transform .16s var(--spring), background .2s; }
+  .tbtn:active { transform: scale(.9); background: var(--fill2); }
+  .tbtn.play { background: #fff; color: #000; }
+  .tbtn svg { width: 20px; height: 20px; display: block; }
+  .transport select { width: auto; padding: 9px 10px; font-size: 14px; flex: none; border-radius: 99px; }
+  .tcode { flex: none; min-width: 58px; text-align: right; font-weight: 700; font-size: 15px; color: var(--ink2); }
+  .deck { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .deck .transport { margin: 0; gap: 6px; }
+  .trim { position: relative; flex: 1; min-width: 90px; height: 44px; border-radius: 13px; background: var(--fill); overflow: hidden; touch-action: none; cursor: pointer; user-select: none; -webkit-user-select: none; }
+  .trim .sel { position: absolute; top: 0; bottom: 0; min-width: 30px; border: 3px solid #FFD60A; border-left-width: 14px; border-right-width: 14px; border-radius: 13px; background: rgba(255,214,10,.10); box-shadow: 0 0 0 100vmax rgba(0,0,0,.5); pointer-events: none; }
+  .trim .sel .h { position: absolute; top: 50%; width: 3px; height: 14px; margin-top: -7px; border-radius: 2px; background: rgba(0,0,0,.55); }
+  .trim .sel .h.l { left: -9px; } .trim .sel .h.r { right: -9px; }
+  .trim.locked .sel { border: 2px solid rgba(255,255,255,.4); background: rgba(255,255,255,.06); min-width: 6px; }
+  .trim.locked .sel .h { display: none; }
+  .trim .cur { position: absolute; top: 0; bottom: 0; left: 0; width: 3px; margin-left: -1.5px; background: #fff; border-radius: 2px; box-shadow: 0 0 0 1px rgba(0,0,0,.45); pointer-events: none; }
+  .timeline { position: relative; height: 26px; border-radius: 9px; background: var(--fill); overflow: hidden; cursor: pointer; margin-top: 8px; touch-action: none; }
+  .timeline .c { position: absolute; top: 5px; bottom: 5px; border-radius: 4px; }
+  .timeline .c.L { background: var(--left); } .timeline .c.R { background: var(--right); }
+  .timeline .cur { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1.5px; background: #fff; border-radius: 2px; box-shadow: 0 0 0 1px rgba(0,0,0,.4); }
+  .edtl { position: relative; height: 84px; margin-top: 8px; border-radius: 14px; background: var(--fill); overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+  .edrow { position: absolute; left: 0; right: 0; height: 42px; }
+  .edrow[data-side="L"] { top: 0; border-bottom: .5px solid var(--sep); } .edrow[data-side="R"] { top: 42px; }
+  .edrow .lab { position: absolute; left: 8px; top: 13px; font-size: 11px; font-weight: 600; color: var(--muted); pointer-events: none; }
+  .edbar { position: absolute; top: 6px; bottom: 6px; border-radius: 7px; min-width: 6px; }
+  .edbar.L { background: var(--left); } .edbar.R { background: var(--right); }
+  .edbar.man { background-image: repeating-linear-gradient(45deg, rgba(255,255,255,.28) 0 4px, transparent 4px 8px); }
+  .edbar.sel { box-shadow: 0 0 0 3px #fff; }
+  .edbar::before, .edbar::after { content: ""; position: absolute; top: 5px; bottom: 5px; width: 4px; border-radius: 2px; background: rgba(255,255,255,.85); }
+  .edbar::before { left: 2px; } .edbar::after { right: 2px; }
+  .edtl .cur { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; pointer-events: none; }
+  .edmini { position: relative; height: 20px; margin-top: 6px; border-radius: 7px; background: var(--fill); overflow: hidden; cursor: pointer; }
+  .edmini .c { position: absolute; top: 4px; bottom: 4px; border-radius: 2px; } .edmini .c.L { background: var(--left); } .edmini .c.R { background: var(--right); }
+  .edmini .key { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1px; background: #FFD60A; border-radius: 2px; pointer-events: none; }
+  .edmini .win { position: absolute; top: 0; bottom: 0; border: 2px solid #fff; border-radius: 7px; pointer-events: none; }
+  .stepper { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin: 6px 0 14px; }
+  .stepper div { height: 5px; border-radius: 3px; background: var(--fill); transition: background .3s; }
+  .stepper div.on { background: var(--track); }
+  .foot { display: flex; gap: 10px; margin-top: 16px; }
+  .foot .btn { flex: 1; }
+  .opt-row { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 10px; }
+  .opt-row label { display: flex; gap: 8px; align-items: center; }
+
+  /* Einrichten, klassische Ansicht (großer Bildschirm) */
+  .split { display: grid; gap: 14px; }
+  @media (min-width: 900px) { .split { grid-template-columns: 1.35fr 1fr; align-items: start; } }
+  .setup-media { position: sticky; top: calc(58px + var(--safe-t)); z-index: 6; background: var(--bg); padding: 4px 0 10px; }
+  #rangeBtns { margin-top: 10px; }
+
+  /* ---------- Vollbild-Editor: Video füllt den Schirm, Bedienung schwebt als Glas ---------- */
+  body.fs-on { overflow: hidden; padding-bottom: 0; background: #000; }
+  body.fs-on::before { display: none; }
+  body.fs-on .tabbar, body.fs-on .top, body.fs-on #s-setup > .stepper, body.fs-on #setupTitle, body.fs-on #setupSub, body.fs-on #s-setup .setup-cards, body.fs-on #fsOpen, body.fs-on #setupBadge { display: none !important; }
+  body.fs-on main { padding: 0; max-width: none; }
+  body.fs-on #s-setup.on { animation: none; }
+  body.fs-on #s-setup .split { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; height: 100vh; height: 100dvh; gap: 0; overflow: hidden; background: #000; color: #fff;
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
+  .fs-amb { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; pointer-events: none; opacity: .6; filter: blur(48px) saturate(1.35) brightness(.6); transform: scale(1.3); }
+  body.fs-on .setup-media { position: relative; top: auto; z-index: auto; background: none; padding: 0; display: flex; align-items: center; justify-content: center; min-height: 0; min-width: 0; overflow: hidden; }
+  body.fs-on #setupStage { margin: 0; max-width: none; border-radius: 14px; flex: none; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+  .fs-bar { position: relative; display: flex; align-items: center; gap: 8px; margin: 8px 10px 8px; padding: 6px; border-radius: 28px; color: #fff; }
+  .fs-ic { width: 40px; height: 40px; flex: none; border: 0; border-radius: 50%; background: rgba(255,255,255,.14); color: #fff; display: grid; place-items: center; cursor: pointer; padding: 0; font-weight: 700; font-size: 17px; transition: transform .16s var(--spring); }
+  .fs-ic:active { transform: scale(.9); }
+  .fs-ttl { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.22; padding: 0 2px; }
+  .fs-ttl b { font-family: var(--display); font-size: 17px; font-weight: 700; }
+  .fs-ttl b small { font-family: var(--text); font-weight: 600; font-size: 12px; color: rgba(255,255,255,.6); margin-left: 6px; }
+  .fs-ttl span { font-size: 12.5px; color: rgba(255,255,255,.78); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .fs-ttl span.warn { color: var(--near); }
+  .fs-next { flex: none; border: 0; border-radius: 99px; background: var(--track); color: #fff; font-weight: 700; font-size: 15px; padding: 11px 16px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; box-shadow: inset 0 1px 0 rgba(255,255,255,.3); transition: transform .16s var(--spring); }
+  .fs-next:active { transform: scale(.95); }
+  .fs-next svg { width: 8px; height: 13px; }
+  .fs-side { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 10px; min-width: 0; color: #fff; }
+  .fs-tools { position: relative; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .fs-tool, .fs-tools select, .fs-field, .fs-seg { background: rgba(60,60,64,.5); border: .5px solid var(--glass-line); box-shadow: inset 0 1px 0 rgba(255,255,255,.18); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); }
+  .fs-tool { flex: none; border-radius: 99px; color: #fff; font-weight: 600; font-size: 14.5px; padding: 10px 14px; display: inline-flex; align-items: center; gap: 7px; cursor: pointer; white-space: nowrap; transition: transform .16s var(--spring), background .2s; }
+  .fs-tool i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .fs-tool svg { width: 16px; height: 16px; flex: none; }
+  .fs-tool.on { background: #fff; color: #000; box-shadow: 0 0 0 3px var(--track); }
+  .fs-tool.done { border-color: rgba(48,209,88,.7); }
+  .fs-tool.accent { background: rgba(255,90,46,.32); border-color: rgba(255,140,110,.6); }
+  .fs-tool:active { transform: scale(.95); }
+  .fs-tools select { width: auto; color: #fff; border-radius: 99px; padding: 10px 12px; font-size: 14.5px; font-weight: 600; flex: none; }
+  .fs-field { display: inline-flex; align-items: center; gap: 6px; flex: none; border-radius: 99px; padding: 0 12px 0 14px; font-size: 14.5px; font-weight: 600; color: #fff; }
+  .fs-field input { width: 58px; background: none; padding: 10px 0; font-size: 14.5px; font-weight: 700; text-align: right; border-radius: 0; font-variant-numeric: tabular-nums; }
+  .fs-field input:focus { box-shadow: none; }
+  .fs-field span { color: rgba(255,255,255,.6); font-weight: 500; }
+  .fs-seg { display: inline-flex; flex: none; border-radius: 99px; padding: 3px; }
+  .fs-seg button { border: 0; background: none; color: #fff; padding: 7px 12px; border-radius: 99px; font-weight: 600; font-size: 14px; cursor: pointer; white-space: nowrap; }
+  .fs-seg button.on { background: #fff; color: #000; }
+  .fs-media { position: relative; border-radius: 24px; padding: 8px 10px; color: #fff; transition: opacity .25s, transform .3s var(--ease); }
+  .fs-media .deck { margin: 0; flex-wrap: wrap; row-gap: 8px; }
+  .fs-media .trim { flex-basis: 100%; order: -1; height: 48px; }
+  .fs-media .tcode { margin-left: auto; font-size: 17px; }
+  .fs-media #rangeBtns { display: none; }
+  .fs-media .tbtn { background: rgba(255,255,255,.14); color: #fff; }
+  .fs-media .tbtn.play { background: #fff; color: #000; }
+  .fs-media .trim { background: rgba(255,255,255,.14); }
+  .fs-media .tcode { color: #fff; }
+  body.fs-on .toast { bottom: auto; top: calc(74px + var(--safe-t)); }
+  @media (orientation: landscape) and (max-height: 600px) {
+    body.fs-on #s-setup .split { grid-template-columns: minmax(0, 1fr) clamp(172px, 22vw, 212px); grid-template-rows: auto minmax(0, 1fr); }
+    body.fs-on .setup-media { grid-column: 1; grid-row: 1 / 3; }
+    body.fs-on #setupStage { border-radius: 0; box-shadow: none; }
+    .fs-bar { grid-column: 2; grid-row: 1; flex-wrap: wrap; gap: 6px; margin: 8px 8px 6px 6px; border-radius: 24px; }
+    .fs-ttl { order: 5; flex-basis: 100%; padding: 2px 6px 4px; }
+    .fs-ttl span { -webkit-line-clamp: 3; }
+    .fs-next { order: 6; flex-basis: 100%; justify-content: center; padding: 11px 14px; }
+    .fs-media .deck { flex-wrap: nowrap; }
+    .fs-media .trim { flex-basis: 0; order: 0; height: 44px; }
+    .fs-media .tcode { font-size: 15px; }
+    .fs-side { display: contents; }
+    .fs-tools { grid-column: 2; grid-row: 2; align-self: start; max-height: 100%; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 6px; overflow-y: auto; touch-action: pan-y; padding: 0 8px 8px 6px; scrollbar-width: none; }
+    .fs-tools::-webkit-scrollbar { display: none; }
+    .fs-tool { justify-content: flex-start; white-space: normal; padding: 9px 12px; font-size: 13.5px; }
+    .fs-tools select, .fs-field, .fs-seg { width: 100%; }
+    .fs-field input { flex: 1; width: auto; }
+    .fs-seg button { flex: 1; padding: 7px 4px; }
+    .fs-media { grid-column: 1; grid-row: 2; align-self: end; justify-self: center; width: min(600px, calc(100% - 24px)); margin-bottom: 10px; }
+    body.fs-armed .fs-media, body.fs-clean .fs-media { opacity: 0; transform: translateY(18px); pointer-events: none; }
+  }
+
+  /* ---------- Fortschritt ---------- */
+  .ring-wrap { display: grid; place-items: center; margin: 10px 0 14px; }
+  .ring-wrap svg { width: 132px; height: 132px; transform: rotate(-90deg); }
+  .ring-wrap .pct { position: absolute; font-family: var(--display); font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  /* ---------- Ergebnis ---------- */
+  .res-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .pill { font-size: 13px; background: var(--card2); color: var(--ink2); padding: 5px 10px; border-radius: 99px; }
+  .pill.side.L { background: color-mix(in srgb, var(--left) 18%, var(--card)); color: var(--left); }
+  .pill.side.R { background: color-mix(in srgb, var(--right) 18%, var(--card)); color: var(--right); }
+  .pill.hurdle { background: color-mix(in srgb, var(--lane) 18%, var(--card)); color: #6CB4FF; }
+  .tabs-sticky { position: sticky; top: calc(56px + var(--safe-t)); z-index: 10; margin: 0 -16px; padding: 8px 16px 10px; background: rgba(0,0,0,.6); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); }
+  .herostat { margin: 8px 0 14px; }
+  .herostat .l { font-size: 13px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+  .herostat .row1 { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .herostat .v { font-family: var(--display); font-size: clamp(64px, 20vw, 88px); line-height: 1; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .herostat .u { font-size: 20px; color: var(--muted); font-weight: 600; font-family: var(--display); }
+  .herostat .badge2 { margin-left: auto; font-size: 13px; font-weight: 700; padding: 6px 11px; border-radius: 99px; }
+  .kpi3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 18px; }
+  .kpi3 .k { background: var(--card); border-radius: 18px; padding: 12px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .kpi3 .k .l { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kpi3 .k .v { font-family: var(--display); font-size: 25px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .kpi3 .k .v small { display: block; font-family: var(--text); font-size: 12px; color: var(--muted); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kpi3 .k .bar { height: 4px; border-radius: 2px; }
+  h3.sect { font-family: var(--display); font-size: 22px; font-weight: 700; margin: 26px 2px 10px; color: var(--ink); }
+  .rings { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  .ringtile { background: var(--card); border-radius: 20px; padding: 16px 14px 14px; border: 0; text-align: left; cursor: pointer; transition: transform .18s var(--spring); display: flex; flex-direction: column; gap: 10px; color: var(--ink); }
+  .ringtile:active { transform: scale(.97); }
+  .ringtile svg { width: 64px; height: 64px; transform: rotate(-90deg); }
+  .ringtile .nm { font-weight: 600; font-size: 15px; line-height: 1.2; }
+  .ringtile .st { font-size: 13px; color: var(--muted); }
+  .keys { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+  .key { background: var(--card); border-radius: 18px; padding: 12px 14px; }
+  .key .l { font-size: 13px; color: var(--muted); }
+  .key .v { font-family: var(--display); font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .key .v small { font-size: 13px; font-weight: 600; color: var(--muted); margin-left: 3px; font-family: inherit; }
+  #p-overview .keys { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
+  #findings { background: none; display: grid; gap: 8px; border-radius: 0; overflow: visible; }
+  .finding { display: grid; grid-template-columns: 6px 1fr; gap: 12px; padding: 14px; background: var(--card); border-radius: 18px; }
+  .finding .bar { border-radius: 3px; }
+  .finding .t { font-weight: 600; }
+  .finding .v { font-family: var(--display); font-weight: 700; }
+  .finding .tip { color: var(--ink2); font-size: 13.5px; margin: 3px 0 8px; }
+  .finding .btn.sm { padding: 7px 12px; font-size: 13px; }
+  .summary { background: var(--card); color: var(--ink); border-radius: 22px; padding: 18px 18px 16px; margin: 14px 0 12px; }
+  .summary h2 { font-family: var(--display); font-size: 20px; line-height: 1.15; margin: 0 0 8px; font-weight: 700; }
+  .summary p { margin: 0 0 6px; color: var(--ink2); font-size: 15px; max-width: 60ch; }
+  .summary .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; font-size: 13px; color: var(--muted); }
+  .summary .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  details.more { margin-top: 10px; }
+  details.more summary { cursor: pointer; color: var(--info); font-weight: 600; font-size: 15px; padding: 8px 2px; list-style: none; }
+  details.more summary::-webkit-details-marker { display: none; }
+  details.more summary::after { content: " ▾"; } details.more[open] summary::after { content: " ▴"; }
+  details.more .keys { margin-top: 6px; }
+  .phasebox { margin: 0 0 12px; }
+
+  .mrow { padding: 14px 16px; border-bottom: .5px solid var(--sep); cursor: pointer; transition: background .15s; }
+  .mrow:last-child { border-bottom: 0; }
+  .mrow:active { background: var(--card2); }
+  .mrow .top2 { display: flex; align-items: baseline; gap: 10px; }
+  .mrow .nm { flex: 1; font-size: 15px; }
+  .mrow .val { font-family: var(--display); font-weight: 700; font-size: 21px; font-variant-numeric: tabular-nums; }
+  .mrow .val small { font-size: 12px; color: var(--muted); font-weight: 600; margin-left: 2px; font-family: inherit; }
+  .mrow .tip { font-size: 13px; color: var(--ink2); margin-top: 6px; }
+  .refbar { position: relative; height: 8px; border-radius: 4px; background: var(--fill); margin: 10px 0 16px; }
+  .refbar .zone { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--good) 55%, transparent); border-radius: 4px; }
+  .refbar .me { position: absolute; top: -5px; width: 18px; height: 18px; margin-left: -9px; border-radius: 50%; background: #fff; border: 3px solid #000; box-shadow: 0 0 0 1.5px #fff; }
+  .refbar .me.b { background: var(--info); }
+  .refbar .lbl { position: absolute; top: 12px; font-size: 11px; color: var(--muted); transform: translateX(-50%); }
+  .area-h { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: .5px solid var(--sep); }
+  .area-h h3 { margin: 0; flex: 1; font-size: 17px; color: var(--ink); }
+  .vc-info { display: flex; gap: 12px; align-items: flex-start; margin: 0 0 2px; }
+  .vc-info .big { font-family: var(--display); font-size: 32px; font-weight: 700; line-height: 1; white-space: nowrap; }
+  .stepchips .chip { font-family: var(--display); font-variant-numeric: tabular-nums; }
+  .figwrap { background: var(--card); border-radius: 20px; overflow: hidden; }
+  .figwrap canvas { display: block; width: 100%; height: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; font-variant-numeric: tabular-nums; }
+  th, td { padding: 10px 8px; border-bottom: .5px solid var(--sep); text-align: right; white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  th:first-child, td:first-child, .l { text-align: left; }
+  .sheet td:first-child, .sheet th:first-child { white-space: normal; min-width: 120px; }
+  tr.click { cursor: pointer; } tr.off td { opacity: .4; }
+  .tablewrap { overflow-x: auto; }
+  svg text { fill: var(--muted); font-size: 11px; }
+  svg.chart text { font-size: 15px; }
+  @media (max-width: 600px) { svg.chart text { font-size: 21px; } }
+  @media (max-width: 480px) { .seg button { padding: 8px 4px; font-size: 13px; } }
+
+  .kinowrap { border-radius: 14px; overflow: hidden; background: #101216; }
+  .kinocv { display: block; width: 100%; height: auto; cursor: pointer; }
+  .kinobig { border-radius: 14px; overflow: hidden; background: #101216; margin-bottom: 8px; display: flex; justify-content: center; }
+  .kinobig canvas { display: block; max-width: 100%; max-height: 52vh; height: auto; }
+  .kinoadj { margin-top: 10px; }
+  .kpick { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+  .kpick button { border: 0; background: var(--card2); border-radius: 12px; padding: 6px 2px; font-size: 11.5px; font-weight: 600; color: var(--ink); cursor: pointer; line-height: 1.2; min-width: 0; overflow: hidden; }
+  .kpick button span { display: block; font-family: var(--display); font-size: 17px; }
+  .kpick button small { color: var(--track); }
+  .kpick button.on { background: var(--track); color: #fff; } .kpick button.on small { color: #fff; }
+  .knudge { margin-top: 10px; padding: 12px; border-radius: 16px; background: var(--card2); }
+  .steplist { display: grid; gap: 8px; }
+  .stepcard { border-radius: 16px; padding: 12px; background: var(--card2); cursor: pointer; }
+  .stepcard.off { opacity: .45; }
+  .sc-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .sc-top b { font-family: var(--display); font-size: 18px; }
+  .sc-inc { display: grid; place-items: center; padding: 4px; margin: -4px; }
+  .sc-conf { margin-left: auto; font-size: 12px; font-weight: 600; }
+  .sc-vals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 10px; margin-top: 8px; }
+  .sc-vals div { min-width: 0; display: flex; flex-direction: column; }
+  .sc-vals span { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sc-vals b { font-size: 19px; font-family: var(--display); }
+  .sc-vals small { font-size: 12px; color: var(--muted); font-weight: 500; }
+
+  /* Video im Ergebnis groß: füllt den Schirm, Bedienung als Glas darunter */
+  .vfs-only { display: none; }
+  .vfs { position: fixed; inset: 0; z-index: 80; background: #000; display: flex; flex-direction: column; gap: 8px; overflow: hidden;
+    padding: calc(8px + env(safe-area-inset-top, 0px)) calc(10px + env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) calc(10px + env(safe-area-inset-left, 0px)); }
+  .vfs .stage { flex: 1; min-height: 0; border-radius: 16px; background: #000; }
+  .vfs .stage canvas.main { position: absolute; inset: 0; margin: auto; width: auto; height: auto; max-width: 100%; max-height: 100%; touch-action: none; }
+  .vfs .fsbtn .i-max { display: none; } .vfs .fsbtn .i-min { display: block; }
+  .vfs .transport, .vfs .vfs-only { margin: 0; padding: 8px 10px; border-radius: 24px; background: rgba(44,44,46,.7); border: .5px solid var(--glass-line); box-shadow: inset 0 1px 0 rgba(255,255,255,.18); }
+  .vfs .vfs-only { display: flex; flex-wrap: nowrap; gap: 8px; align-items: center; }
+  .vfs .vfs-only .btn { flex: 1; padding: 10px 8px; font-size: 14px; }
+  .vfs .timeline, .vfs .edtl, .vfs .edmini { margin-top: 0; flex: none; }
+  .vfs .opt-row, .vfs .vfs-hide { display: none; }
+  body.vfs-on { overflow: hidden; }
+  @media (orientation: landscape) and (max-height: 600px) { .vfs .edmini, .vfs .timeline { display: none; } .vfs { gap: 6px; } .vfs .edtl { height: 64px; } .vfs .edrow { height: 32px; } .vfs .edrow[data-side="R"] { top: 32px; } .vfs .edrow .lab { top: 8px; } }
+
+  /* ---------- Läufe ---------- */
+  .run { display: grid; grid-template-columns: 64px 1fr auto; gap: 12px; align-items: center; padding: 12px 16px; border-bottom: .5px solid var(--sep); cursor: pointer; transition: background .15s; }
+  .run:last-child { border-bottom: 0; }
+  .run:active { background: var(--card2); }
+  .run img, .run .ph { width: 64px; height: 48px; border-radius: 12px; object-fit: cover; background: var(--card2); }
+  .run .t { font-weight: 600; }
+  .run .m { font-size: 13px; color: var(--muted); }
+  .run .tm { font-family: var(--display); font-weight: 700; font-size: 19px; font-variant-numeric: tabular-nums; }
+  .run .sel { width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--fill2); display: none; place-items: center; color: transparent; font-size: 14px; }
+  .selecting .run .sel { display: grid; }
+  .run.picked .sel { background: var(--track); border-color: var(--track); color: #fff; }
+  .cmpA { color: var(--left); font-weight: 700; } .cmpB { color: var(--right); font-weight: 700; }
+
+  /* ---------- Sheet, Toast ---------- */
+  .scrim { position: fixed; inset: 0; z-index: 90; background: rgba(0,0,0,.5); opacity: 0; pointer-events: none; transition: opacity .25s; }
+  .scrim.on { opacity: 1; pointer-events: auto; }
+  .sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 91; max-height: 92vh; max-height: 92dvh; overflow: auto; background: #1C1C1E; border-radius: 30px 30px 0 0; padding: 8px 20px calc(20px + var(--safe-b)); transform: translateY(105%); transition: transform .42s var(--ease), visibility 0s .42s; max-width: 720px; margin: 0 auto; box-shadow: 0 -1px 0 rgba(255,255,255,.12), 0 -20px 60px rgba(0,0,0,.5); visibility: hidden; }
+  .sheet.on { transform: none; visibility: visible; transition: transform .42s var(--ease), visibility 0s; }
+  .sheet .grab { width: 38px; height: 5px; border-radius: 3px; background: var(--fill2); margin: 4px auto 14px; }
+  .sheet h2 { margin: 0 0 12px; font-family: var(--display); font-size: 24px; font-weight: 700; }
+  .sheet .card, .sheet .list { background: var(--card2); }
+  .toast { position: fixed; left: 50%; bottom: calc(96px + var(--safe-b)); z-index: 95; max-width: calc(100% - 32px); transform: translate(-50%, 20px); opacity: 0; color: #fff; padding: 12px 18px; border-radius: 99px; font-weight: 600; font-size: 15px; text-align: center; transition: all .3s var(--spring); pointer-events: none;
+    background: rgba(58,58,60,.72); border: .5px solid var(--glass-line); box-shadow: var(--glass-shadow); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); }
+  .toast.on { opacity: 1; transform: translate(-50%, 0); }
+  #fsOpen { display: none; }
+  ol.tight { padding-left: 20px; margin: 10px 0 0; display: grid; gap: 8px; }
+  .card p { margin: 0 0 10px; }
+  .swout { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-top: 10px; }
+  .swout .big { font-size: 34px; font-weight: 700; line-height: 1; }
+  .splits { display: grid; gap: 8px; margin: 10px 0 4px; }
+  .split-row { display: grid; grid-template-columns: 78px 1fr auto; gap: 4px 10px; align-items: center; background: var(--card); border-radius: 16px; padding: 12px 14px; }
+  .split-row .bar { height: 8px; border-radius: 4px; background: var(--fill); overflow: hidden; }
+  .split-row .bar i { display: block; height: 100%; background: var(--lane); border-radius: 4px; }
+  .split-row .tm { font-weight: 700; font-size: 20px; }
+  .split-row .meta { grid-column: 1 / -1; font-size: 13px; color: var(--muted); }
+  @media (min-width: 900px) and (min-height: 601px) { body.fs-on #s-setup .split { grid-template-columns: minmax(0, 1fr) 300px; grid-template-rows: auto minmax(0, 1fr) auto; }
+    body.fs-on .setup-media { grid-column: 1; grid-row: 1 / 3; padding: 16px; } .fs-bar { grid-column: 2; grid-row: 1; flex-wrap: wrap; margin: 16px 16px 8px 0; }
+    .fs-ttl { order: 5; flex-basis: 100%; padding: 4px 8px; } .fs-next { order: 6; flex-basis: 100%; justify-content: center; }
+    .fs-side { display: contents; } .fs-tools { grid-column: 2; grid-row: 2; align-self: start; flex-direction: column; align-items: stretch; padding: 0 16px 0 0; }
+    .fs-tools select, .fs-field, .fs-seg { width: 100%; } .fs-seg button { flex: 1; } .fs-field input { flex: 1; width: auto; } .fs-tool { justify-content: flex-start; }
+    .fs-media { grid-column: 1; grid-row: 3; margin: 0 16px 16px; } }
+  .jog { position: relative; height: 48px; margin-top: 8px; border-radius: 14px; background: var(--fill); overflow: hidden; touch-action: none; cursor: ew-resize; user-select: none; -webkit-user-select: none; flex: none; }
+  .jog-ticks { position: absolute; left: -28px; right: -28px; bottom: 0; height: 18px; background: repeating-linear-gradient(90deg, rgba(255,255,255,.4) 0 2px, transparent 2px 14px); }
+  .jog-mid { position: absolute; left: 50%; bottom: 0; height: 24px; width: 3px; margin-left: -1.5px; background: var(--track); border-radius: 2px; }
+  .jog-t { position: absolute; left: 8px; right: 8px; top: 6px; text-align: center; font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+  .jogseg { margin-top: 8px; flex: none; }
+  .timeline .mk { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1.5px; background: #FFD60A; border-radius: 2px; }
+  button.split-row { border: 0; color: var(--ink); text-align: left; cursor: pointer; width: 100%; font: inherit; background: var(--card2); }
+  .vfs .jog, .vfs .jogseg { margin-top: 0; }
+  @media (orientation: landscape) and (max-height: 600px) { .vfs .jogseg { display: none; } }
+  /* Großansicht: das Video füllt den Schirm, die Bedienung liegt als Glasleiste darüber, ein Tipp blendet sie aus */
+  .vfs { padding: 0; display: block; }
+  .vfs .stage { position: absolute; inset: 0; border-radius: 0; }
+  .vfs .stage .badge { left: calc(12px + env(safe-area-inset-left, 0px)); top: calc(12px + env(safe-area-inset-top, 0px)); transition: opacity .25s; }
+  .vfs .fsbtn { right: calc(12px + env(safe-area-inset-right, 0px)); top: calc(12px + env(safe-area-inset-top, 0px)); transition: opacity .25s; }
+  .vfs .vfs-ui { position: absolute; z-index: 2; left: calc(10px + env(safe-area-inset-left, 0px)); right: calc(10px + env(safe-area-inset-right, 0px)); bottom: calc(10px + env(safe-area-inset-bottom, 0px)); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px; border-radius: 28px;
+    background: rgba(28,28,30,.5); border: .5px solid var(--glass-line); box-shadow: var(--glass-shadow); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); transition: opacity .25s, transform .3s var(--ease); }
+  .vfs .transport, .vfs .vfs-only { padding: 0; margin: 0; background: none; border: 0; box-shadow: none; border-radius: 0; }
+  .vfs .transport { flex: none; gap: 6px; }
+  .vfs .transport input[type=range], .vfs #vcSpeed, .vfs .timeline, .vfs .vfs-more, .vfs .edmini { display: none; }
+  .vfs.more #vcSpeed { display: block; }
+  .vfs.more .timeline { display: block; flex-basis: 100%; order: 9; }
+  .vfs.more .vfs-more { display: flex; flex-basis: 100%; order: 10; }
+  .vfs .jog { flex: 1; min-width: 110px; height: 44px; margin: 0; background: rgba(255,255,255,.12); }
+  .vfs .vfs-act { flex: none; gap: 6px; }
+  .vfs .vfs-act .btn, .vfs .vfs-more .btn { flex: none; padding: 11px 16px; background: rgba(255,255,255,.16); }
+  .vfs .vfs-more .btn { flex: 1; }
+  .vfs #edCol, .vfs .edtl { flex-basis: 100%; }
+  .vfs .edtl { order: 5; }
+  .vfs.clean .vfs-ui, .vfs.clean .badge, .vfs.clean .fsbtn { opacity: 0; pointer-events: none; }
+  .vfs.clean .vfs-ui { transform: translateY(18px); }
+  .jog-ticks { opacity: .55; }
+  .vfs.more .timeline { display: none; }
+  .vfs .vfs-act .btn.armed { background: var(--track); }
+  body.vfs-on .toast { bottom: auto; top: calc(14px + var(--safe-t)); }
+  /* Großansicht „Im Video“: Spulleiste über die ganze Breite unten, oben zwei schlanke Glaskapseln */
+  #vcCol.vfs .vfs-ui { display: contents; }
+  #vcCol.vfs .transport, #vcCol.vfs .vfs-act, #vcCol.vfs .jog, #vcCol.vfs.more .vfs-more { position: absolute; z-index: 3; background: rgba(28,28,30,.55); border: .5px solid var(--glass-line); box-shadow: var(--glass-shadow); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); transition: opacity .25s, transform .3s var(--ease); }
+  #vcCol.vfs .transport { top: calc(12px + env(safe-area-inset-top, 0px)); left: calc(12px + env(safe-area-inset-left, 0px)); padding: 5px; gap: 4px; border-radius: 99px; }
+  #vcCol.vfs .transport .tbtn { width: 42px; height: 42px; background: transparent; }
+  #vcCol.vfs .transport .tbtn.play { background: #fff; }
+  #vcCol.vfs .transport .tbtn svg { width: 18px; height: 18px; }
+  #vcCol.vfs .vfs-act { top: calc(12px + env(safe-area-inset-top, 0px)); right: calc(12px + env(safe-area-inset-right, 0px)); padding: 5px 52px 5px 5px; gap: 4px; border-radius: 99px; }
+  #vcCol.vfs .vfs-act .btn { height: 42px; padding: 0 16px; font-size: 15px; background: transparent; }
+  #vcCol.vfs .vfs-act .btn.ic { width: 42px; padding: 0; border-radius: 50%; background: rgba(255,255,255,.14); }
+  #vcCol.vfs .vfs-act .btn.ic.armed { background: var(--track); }
+  .btn.ic .i-ok, .btn.ic.armed .i-flag { display: none; } .btn.ic.armed .i-ok { display: block; }
+  .l-less, .vfs.more .l-more { display: none; } .vfs.more .l-less { display: inline; }
+  #vcCol.vfs.more .vfs-act [data-more] { background: rgba(255,255,255,.14); }
+  #vcCol.vfs .fsbtn { width: 42px; height: 42px; top: calc(17px + env(safe-area-inset-top, 0px)); right: calc(17px + env(safe-area-inset-right, 0px)); z-index: 4; background: transparent; border: 0; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  #vcCol.vfs .fsbtn svg { width: 18px; height: 18px; }
+  #vcCol.vfs .stage .badge { top: calc(72px + env(safe-area-inset-top, 0px)); font-size: 12.5px; padding: 6px 11px; }
+  #vcCol.vfs .jog { left: calc(12px + env(safe-area-inset-left, 0px)); right: calc(12px + env(safe-area-inset-right, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); height: 64px; border-radius: 22px; min-width: 0; }
+  #vcCol.vfs .jog-t { font-size: 17px; }
+  #vcCol.vfs.more .vfs-more { display: flex; flex-direction: column; top: calc(72px + env(safe-area-inset-top, 0px)); right: calc(12px + env(safe-area-inset-right, 0px)); width: 200px; gap: 4px; padding: 6px; border-radius: 22px; z-index: 5; }
+  #vcCol.vfs.more .vfs-more .btn { width: 100%; justify-content: flex-start; background: transparent; padding: 11px 14px; font-size: 15px; border-radius: 16px; }
+  #vcCol.vfs.more .vfs-more .btn:active { background: rgba(255,255,255,.14); }
+  #vcCol.vfs #vcSpeed, #vcCol.vfs.more #vcSpeed { display: none; }
+  #vcCol.vfs #vcCanvas { transform-origin: 50% 50%; will-change: transform; }
+  .zoomreset { position: absolute; z-index: 4; left: 50%; bottom: calc(90px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); border: .5px solid var(--glass-line); color: #fff; font-weight: 600; font-size: 14px; padding: 9px 16px; border-radius: 99px; cursor: pointer;
+    background: rgba(28,28,30,.6); box-shadow: var(--glass-shadow); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); font-variant-numeric: tabular-nums; }
+  #vcCol:not(.vfs) .zoomreset, #vcCol.vfs.clean .zoomreset { display: none; }
+  #vcCol.vfs.clean .transport, #vcCol.vfs.clean .vfs-act, #vcCol.vfs.clean .jog, #vcCol.vfs.clean .vfs-more { opacity: 0; pointer-events: none; }
+  #vcCol.vfs.clean .jog { transform: translateY(18px); }
+  #vcCol.vfs.clean .transport, #vcCol.vfs.clean .vfs-act { transform: translateY(-18px); }
+  .vfs .vfs-ui > .vfs-only:not(.vfs-act):not(.vfs-more) { flex: 1; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <button class="back" id="backBtn" aria-label="Zurück"><svg viewBox="0 0 12 20" width="9" height="15" aria-hidden="true"><path d="M10 2 2 10l8 8" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="backTxt">Zurück</span></button>
+    <h1 id="topTitle">Sprint-Analyse</h1>
+    <span class="store" id="storeInfo"><i></i><span>verbinde …</span></span>
+  </div>
+</header>
+
+<main>
+<!-- ======================= ANALYSE ======================= -->
+<section class="view on" id="v-analyse">
+
+  <!-- Start -->
+  <div class="screen on" id="s-pick">
+    <h1 class="claim">Lauf rein.<br><span>Technik raus.</span></h1>
+    <label class="cta" id="drop">
+      <span class="cta-ic"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span>
+      <span class="cta-tx"><b>Video analysieren</b><span>Seitlich gefilmt, gern in Zeitlupe. Das Video bleibt auf deinem Gerät.</span></span>
+      <input type="file" id="file" accept="video/*" multiple hidden>
+    </label>
+    <div class="tiles2">
+      <button class="tile2" id="goCompare"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="4" width="8" height="16" rx="2"/><rect x="13" y="4" width="8" height="16" rx="2"/></svg><b>Zwei vergleichen</b></button>
+      <label class="tile2"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 7h18M3 12h18M3 17h12"/></svg><b>Mehrere auf einmal</b><input type="file" id="fileMulti" accept="video/*" multiple hidden></label>
+    </div>
+    <div class="sect-row"><h2 class="sect2">Letzte Läufe</h2><button class="linkbtn" data-goto="laeufe">Alle</button></div>
+    <div class="recent" id="recentRuns"></div>
+    <button class="li plain" data-goto="hilfe" style="margin-top:14px"><span class="grow"><b>So filmst du richtig</b><br><span class="hint small">Seitlich, Hüfthöhe, Zeitlupe</span></span><span class="chev">›</span></button>
+    <span id="runsCount" hidden></span>
+  </div>
+
+  <!-- Einrichten -->
+  <div class="screen" id="s-setup">
+    <div class="stepper"><div id="st1"></div><div id="st2"></div><div id="st3"></div></div>
+    <div class="large" id="setupTitle" style="font-size:28px">Ausschnitt</div>
+    <p class="sub" id="setupSub"></p>
+    <div class="split">
+      <div class="setup-media">
+        <div class="stage" id="setupStage">
+          <video id="video" playsinline muted preload="auto"></video>
+                    <canvas class="ovl" id="setupOvl"></canvas>
+          <div class="tap" id="tapLayer"></div>
+          <div class="badge" id="setupBadge" hidden></div>
+          <div class="hud" id="stageHud" hidden></div>
+          <canvas class="loupe" id="loupe" width="240" height="240"></canvas>
+          <button class="vload" id="vLoad" hidden><span><svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.2v13.6a1 1 0 0 0 1.52.85l11-6.8a1 1 0 0 0 0-1.7l-11-6.8A1 1 0 0 0 8 5.2z" fill="currentColor"/></svg></span>Tippen, um das Video zu laden</button>
+          <button class="fsbtn" id="fsOpen" aria-label="Vollbild"><svg class="i-max" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><svg class="i-min" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button>
+        </div>
+        <div class="deck" id="setupDeck">
+          <div class="transport">
+            <button class="tbtn" id="vPrev" aria-label="Ein Bild zurück"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 5v14"/><path d="M18 5.5 10 12l8 6.5z" fill="currentColor"/></svg></button>
+            <button class="tbtn play" id="vPlay" aria-label="Abspielen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.2v13.6a1 1 0 0 0 1.52.85l11-6.8a1 1 0 0 0 0-1.7l-11-6.8A1 1 0 0 0 8 5.2z" fill="currentColor"/></svg></button>
+            <button class="tbtn" id="vNext" aria-label="Ein Bild vor"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 5v14"/><path d="M6 5.5 14 12l-8 6.5z" fill="currentColor"/></svg></button>
+          </div>
+          <div class="trim" id="rangeBar" role="slider" aria-label="Position und Ausschnitt"><div class="sel" id="rangeSel"><i class="h l"></i><i class="h r"></i></div><div class="cur" id="rangeCur"></div></div>
+          <span class="tcode num" id="vTime">0,00 s</span>
+        </div>
+        <div class="row" id="rangeBtns"><button class="btn tint sm grow" id="setStart">Start hier</button><button class="btn tint sm grow" id="setEnd">Ende hier</button></div>
+      </div>
+      <div class="setup-cards">
+        <!-- Schritt 1 -->
+        <div class="card" data-step="1">
+          <button class="btn tint sm block" id="autoFind" style="margin-bottom:12px">Mich im Video finden</button>
+          <p class="hint small" id="rangeInfo" style="margin:0"></p>
+          <label class="f" style="margin-top:14px">Aufnahme-fps<select id="fps"></select></label>
+          <p class="hint small" id="fpsInfo" style="margin:8px 0 0"></p>
+          <label class="f" style="margin-top:14px">Kamera<div class="seg full" id="segCam"><button data-v="pan" class="on">schwenkt mit</button><button data-v="fixed">Stativ (Standbild)</button></div></label>
+          <p class="hint small" style="margin:8px 0 0">Standard ist „schwenkt mit“ (Handy folgt dir). Nur wenn das Bild komplett stillsteht, „Stativ“ wählen.</p>
+        </div>
+        <!-- Schritt 2 -->
+        <div class="card" data-step="2" hidden>
+          <p style="margin-top:0">Tippe nacheinander <b>zwei Punkte auf einer Bahnlinie</b> nah an deinen Füßen – möglichst weit auseinander.</p>
+          <p class="hint small">Kurz tippen setzt einen Punkt, nochmal auf den Punkt tippen entfernt ihn. Lange drücken zeigt die Lupe zum genauen Setzen oder Verschieben.</p>
+          <p class="hint small">Die Linie sagt der Analyse nur, was <b>waagrecht</b> ist (ob das Handy schief gehalten wurde) – keine Position. Schwenkt die Kamera auf einem Stativ nur zur Seite mit, bleibt diese Schräglage gleich und die Linie gilt fürs ganze Video. Setze sie dann in dem Bild, in dem du genau seitlich vor der Kamera bist.</p>
+          <p class="hint small">Aus der Hand gefilmt und das Bild kippt hin und her? Dann <b>Überspringen</b> – die Neigung wird aus deinen Fußkontakten geschätzt.</p>
+          <div class="row"><button class="btn tint sm" id="laneReset">Neu markieren</button><button class="btn sm" id="markJump" hidden>Zum Bild der Markierung</button></div>
+          <p class="hint small" id="laneInfo" style="margin:8px 0 0"></p>
+          <div id="calibSect"><h3>Optional: Abstand für genaue Längen</h3>
+          <p class="hint small" style="margin-top:0">Stehen zwei Hütchen oder Markierungen mit bekanntem Abstand im Bild (nur bei Stativ), setze beide und gib den Abstand ein. Dann werden Schrittlänge und Tempo genau statt über die Körpergröße bestimmt.</p>
+          <div class="notice warn small" style="margin:0 0 10px">Ein Video ist flach: Eine Strecke im Bild stimmt nur in Metern, wenn beide Markierungen <b>in deiner eigenen Bahn</b> liegen – auf derselben Linie, auf der deine Füße aufsetzen. Hütchen auf einer anderen Bahn, weiter vorne oder hinten, ergeben falsche Längen.</div>
+          <div class="row" style="align-items:center"><button class="btn tint sm" id="calibBtn">Zwei Markierungen antippen</button><label class="f" style="min-width:110px;flex:0 0 120px">Abstand in m<input id="calibM" inputmode="decimal" placeholder="z. B. 5"></label></div>
+          <p class="hint small" id="calibInfo" style="margin-bottom:0"></p></div>
+        </div>
+        <!-- Schritt 3 -->
+        <div class="card" data-step="3" hidden>
+          <div class="stack">
+            <label class="f">Disziplin<div class="seg full" id="segMode"><button data-v="sprint" class="on">Sprint</button><button data-v="hurdle">Hürde</button></div></label>
+            <label class="f">Laufphase (Auto erkennt sie selbst)<div class="seg full" id="segPhase"><button data-v="auto" class="on">Auto</button><button data-v="start">Start</button><button data-v="accel">Beschl.</button><button data-v="maxv">Max</button></div></label>
+            <label class="f">Körpergröße in cm<input type="number" id="height" min="120" max="230" value="180" inputmode="numeric"></label>
+            <div class="row"><button class="btn tint sm grow" id="tapPerson">Mich antippen</button></div>
+            <p class="hint small" id="tapInfo" style="margin:0">Nur nötig, wenn mehrere Personen im Bild sind.</p>
+            <div id="hurdleBox" hidden style="border-top:.5px solid var(--sep);padding-top:12px">
+              <div style="font-weight:600;margin-bottom:6px">Hürden markieren</div>
+              <p class="hint small" style="margin:0 0 10px">Spule zu einem Bild <b>kurz bevor du die Hürde angreifst</b> und tippe auf die Oberkante <b>deiner</b> Hürde. Danach spulen und die nächste antippen – die Nummer zählt automatisch weiter (Hürde 1, 2, 3 …). Eine Hürde nochmal antippen entfernt sie.</p>
+              <div class="row" style="align-items:flex-end"><label class="f" style="flex:0 0 112px;min-width:100px">Hürde Nr.<select id="hurdleNr"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option></select></label><button class="btn tint sm grow" id="tapHurdle">Hürde 1 markieren</button></div>
+              <div class="chips" id="hurdleChips" style="flex-wrap:wrap;margin-top:10px"></div>
+            </div>
+          </div>
+        </div>
+        <div id="setupMsg"></div>
+        <div class="foot"><button class="btn" id="setupBack">Zurück</button><button class="btn primary" id="setupNext">Weiter</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Fortschritt -->
+  <div class="screen" id="s-progress">
+    <div class="large" style="font-size:28px">Analysiere …</div>
+    <p class="sub" id="progText">Lade Erkennungsmodell</p>
+    <div class="ring-wrap" style="position:relative"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="52" stroke="var(--sep)" stroke-width="10" fill="none"/><circle id="progRing" cx="60" cy="60" r="52" stroke="var(--track)" stroke-width="10" fill="none" stroke-linecap="round" stroke-dasharray="327" stroke-dashoffset="327" style="transition:stroke-dashoffset .3s"/></svg><span class="pct" id="progPct">0 %</span></div>
+    <div class="stage" style="max-width:640px;margin:0 auto"><canvas class="main" id="procCanvas"></canvas></div>
+    <div style="text-align:center;margin-top:16px"><button class="btn" id="cancelBtn">Abbrechen</button></div>
+  </div>
+
+  <!-- Ergebnis -->
+  <div class="screen" id="s-result">
+    <div class="res-head">
+      <div class="grow"><div class="hint small" id="resMeta"></div></div>
+      <button class="btn primary sm" id="openSave">Speichern</button><button class="btn sm" id="newBtn" hidden>Neues Video</button>
+    </div>
+    <div class="chips" id="runnerSel" style="margin-bottom:10px" hidden></div>
+    <div class="tabs-sticky">
+      <div class="seg full main" id="resMain"><button data-v="overview" class="on">Überblick</button><button data-v="video">Im Video</button><button data-v="numbers">Zahlen</button><button data-v="pics">Bilder</button></div>
+      <div class="seg full sub" id="resSub" hidden></div>
+      <p class="hint small" id="resInfo" style="margin:8px 2px 0"></p>
+    </div>
+
+    <div class="pane on" id="p-overview">
+      <div id="runnerCmp"></div>
+      <div class="herostat" id="resHero"></div>
+      <div class="kpi3" id="resKpis"></div>
+      <div id="resNotices"></div>
+      <div class="rings" id="ringTiles" hidden></div>
+      <h3 class="sect">Woran du arbeiten kannst</h3>
+      <div class="list" id="findings"></div>
+      <section class="summary" id="resSummary"></section>
+      <details class="more"><summary>Alle Zeiten und Rhythmus</summary><div class="keys" id="keyNums"></div></details>
+      <div id="hurdleBlock" hidden><h3 class="sect">Hürden</h3><div class="chips wrap" id="hurdleSel" style="margin-bottom:10px"></div><div id="hurdleInfo"></div><div class="keys" id="hurdleNums"></div><div id="hurdleMore"></div></div>
+      <details class="more phasebox"><summary>Laufphase ändern <span id="phaseNoteWrap" class="hint small"></span></summary><div class="seg full" id="resPhase" style="margin-top:8px"><button data-v="start">Start</button><button data-v="accel">Beschleunigung</button><button data-v="maxv">Maximaltempo</button></div><p class="hint small" style="margin:8px 2px 0">Im Start ist starke Vorlage richtig, bei Maximaltempo ein Fehler. Darum wird jeder Wert gegen die gewählte Phase bewertet.</p><span class="hint small" id="phaseNote" hidden></span></details>
+      <p class="hint small" style="margin:16px 4px">Richtwerte sind grobe Orientierung aus der Sprint-Biomechanik. Was für dich passt, klärst du mit deinem Trainer. Am aussagekräftigsten ist der Vergleich deiner eigenen Läufe.</p>
+    </div>
+
+    <div class="pane" id="p-check">
+      <label class="f" style="margin-bottom:12px">Welchen Wert willst du prüfen?<select id="vcMetrics"></select></label>
+      <div class="split">
+        <div id="vcCol">
+          <div class="stage"><canvas class="main" id="vcCanvas"></canvas><div class="badge" id="vcBadge"></div><button class="zoomreset" id="vcZoomReset" hidden>1× · Zurück</button><button class="fsbtn" data-focus="vcCol" aria-label="Video groß anzeigen"><svg class="i-max" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><svg class="i-min" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button></div>
+          <div class="vfs-ui">
+          <div class="transport">
+            <button class="tbtn" id="vcPrev" aria-label="Bild zurück"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 5v14"/><path d="M18 5.5 10 12l8 6.5z" fill="currentColor"/></svg></button>
+            <button class="tbtn play" id="vcPlay" aria-label="Abspielen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.2v13.6a1 1 0 0 0 1.52.85l11-6.8a1 1 0 0 0 0-1.7l-11-6.8A1 1 0 0 0 8 5.2z" fill="currentColor"/></svg></button>
+            <button class="tbtn" id="vcNext" aria-label="Bild vor"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 5v14"/><path d="M6 5.5 14 12l-8 6.5z" fill="currentColor"/></svg></button>
+            <input type="range" id="vcScrub" min="0" max="0" value="0" aria-label="Bild">
+            <select id="vcSpeed" aria-label="Tempo, 1× ist die echte Geschwindigkeit"><option value="1">1× echt</option><option value="0.5">0,5×</option><option value="0.25" selected>0,25×</option><option value="0.1">0,1×</option></select>
+          </div>
+          <div class="timeline" id="vcTimeline"></div>
+          <div class="jog" id="vcJog" aria-label="Fein spulen"><div class="jog-ticks" id="vcJogTicks"></div><i class="jog-mid"></i><span class="jog-t num" id="vcJogT"></span></div>
+          <div class="vfs-only vfs-act"><button class="btn sm ic" data-proxy="mkAdd" aria-label="Marke setzen"><svg class="i-flag" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 21V4"/><path d="M6 4h11l-2 4 2 4H6" fill="currentColor"/></svg><svg class="i-ok" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg></button><button class="btn sm" data-more aria-label="Weitere Optionen"><span class="l-more">Mehr</span><span class="l-less">Weniger</span></button></div>
+          <div class="vfs-only vfs-more"><button class="btn sm" id="vcSpeedBtn">Tempo 0,25×</button><button class="btn sm" data-proxy="mkDel">Marke löschen</button><button class="btn sm" id="vcLines">Nur Video</button></div>
+          </div>
+          <div class="opt-row"><label class="hint small"><input type="checkbox" id="vcFull"> Ganzes Bild zeigen</label><label class="hint small"><input type="checkbox" id="vcRaw"> Rohpunkte</label></div>
+        </div>
+        <div>
+          <div class="card">
+            <div class="vc-info"><div class="grow"><div style="font-weight:600" id="vcName"></div><div class="hint small" id="vcHow"></div></div><div class="big" id="vcVal"></div></div>
+            <div id="vcRef"></div>
+            <h3>Pro Schritt</h3>
+            <div class="chips stepchips" id="vcSteps" style="flex-wrap:wrap"></div>
+            <p class="hint small">Tippe einen Schritt an – das Video springt zum Messmoment. Über das Video wischen spult Bild für Bild.</p>
+            <h3>Zeiten messen</h3>
+            <p class="hint small" style="margin-top:0">„Marke setzen“ antippen, dann im Bild auf die Stelle tippen, an der du gerade bist. Jede Marke ist eine eigene Stoppuhr: Sie startet bei 0,00 s und läuft beim Spulen mit.</p>
+            <div class="row"><button class="btn tint sm grow" id="mkAdd">Marke setzen</button><button class="btn sm" id="mkDel" disabled>Marke löschen</button><label class="f" style="flex:0 0 112px;min-width:100px">Abstand in m<input id="swM" inputmode="decimal" placeholder="z. B. 10"></label></div>
+            <div class="swout" id="swOut"></div>
+            <div class="splits" id="mkList"></div>
+            <h3>Reaktionszeit</h3>
+            <p class="hint small" style="margin-top:0">Für Starts mit Kommando oder Klappe. Der Ausschnitt muss kurz vor dem Signal beginnen.</p>
+            <button class="btn tint sm" id="rxRun">Signal im Ton suchen</button>
+            <div id="rxOut"></div>
+            <h3>Bodenkontakt korrigieren</h3>
+            <p class="hint small" id="edTarget" style="margin-top:0">Gehe Bild für Bild (‹ ›) zu dem Bild, in dem der Fuß wirklich aufsetzt oder abhebt.</p>
+            <div class="row"><button class="btn tint sm grow" id="edStart">Kontakt beginnt hier</button><button class="btn tint sm grow" id="edEnd">Kontakt endet hier</button></div>
+            <div class="row" style="margin-top:8px"><button class="btn sm grow" id="edAddL">Fehlenden Kontakt links ab hier</button><button class="btn sm grow" id="edAddR">… rechts ab hier</button></div>
+            <div class="row" style="margin-top:8px"><button class="btn sm grow" id="edDel" style="color:var(--off)">Diesen Kontakt löschen</button><button class="btn ghost sm" id="edReset" hidden>Automatik wiederherstellen</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pane" id="p-edit">
+      <div class="split">
+        <div id="edCol">
+          <div class="stage" id="edStage"><canvas class="main" id="edCanvas"></canvas><div class="badge" id="edBadge"></div><button class="fsbtn" data-focus="edCol" aria-label="Video groß anzeigen"><svg class="i-max" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><svg class="i-min" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button></div>
+          <div class="vfs-ui">
+          <div class="transport">
+            <button class="tbtn" id="edPrev" aria-label="Bild zurück"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 5v14"/><path d="M18 5.5 10 12l8 6.5z" fill="currentColor"/></svg></button>
+            <button class="tbtn play" id="edPlay" aria-label="Abspielen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.2v13.6a1 1 0 0 0 1.52.85l11-6.8a1 1 0 0 0 0-1.7l-11-6.8A1 1 0 0 0 8 5.2z" fill="currentColor"/></svg></button>
+            <button class="tbtn" id="edNext" aria-label="Bild vor"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 5v14"/><path d="M6 5.5 14 12l-8 6.5z" fill="currentColor"/></svg></button>
+            <input type="range" id="edScrub" min="0" max="0" value="0" aria-label="Bild">
+          </div>
+          <div class="edtl" id="edTL"><div class="edrow" data-side="L"><span class="lab">links</span></div><div class="edrow" data-side="R"><span class="lab">rechts</span></div><div class="cur" id="edCur"></div></div>
+          <div class="edmini" id="edMini"></div>
+          <div class="vfs-only"><button class="btn sm" data-proxy="edAddL2">+ links</button><button class="btn sm" data-proxy="edAddR2">+ rechts</button><button class="btn sm" data-proxy="edDel2">Löschen</button><button class="btn sm" data-proxy="edUndo">Rückgängig</button></div>
+          </div>
+          <p class="hint small vfs-hide" style="margin:8px 2px 0">Oben: Ausschnitt um das aktuelle Bild, jeder Balken ist ein Bodenkontakt. Unten: der ganze Lauf – antippen zum Springen.</p>
+        </div>
+        <div>
+          <div class="card">
+            <h2 style="font-size:17px">Schritte korrigieren</h2>
+            <ul class="hint small" style="padding-left:18px;margin:6px 0 12px">
+              <li><b>Fehlt ein Schritt?</b> Zum Bild gehen, in dem der Fuß aufsetzt, dann „+ links“ bzw. „+ rechts“ – oder in der passenden Zeile lange drücken.</li>
+              <li><b>Falsche Länge?</b> Das Ende eines Balkens nach links oder rechts ziehen.</li>
+              <li><b>Falscher Schritt?</b> Balken antippen und löschen oder den Fuß tauschen.</li>
+            </ul>
+            <div class="row"><button class="btn tint sm grow" id="edAddL2">+ links ab hier</button><button class="btn tint sm grow" id="edAddR2">+ rechts ab hier</button></div>
+            <div id="edSelBox" class="notice" hidden style="margin-top:12px"><div id="edSelInfo" style="margin-bottom:8px"></div><div class="row"><button class="btn sm grow" id="edSwap">Fuß tauschen</button><button class="btn sm grow" id="edDel2" style="color:var(--off)">Löschen</button></div></div>
+            <div class="row" style="margin-top:12px"><button class="btn sm grow" id="edUndo" disabled>↶ Rückgängig</button><button class="btn sm grow" id="edAuto">Automatik</button></div>
+          </div>
+          <div class="card">
+            <h2 style="font-size:17px">Bodenlinie</h2>
+            <p class="hint small" style="margin-top:4px" id="glInfo"></p>
+            <button class="btn sm" id="glAuto">Bodenlinie automatisch</button>
+            <h3>Kamera</h3>
+            <div class="seg full" id="edCam"><button data-v="fixed">Stativ</button><button data-v="pan">schwenkt mit</button></div>
+            <p class="hint small" style="margin-bottom:0">Ist die Kamera mitgeschwenkt, aber „Stativ“ ist gewählt, sind Bodenlinie, Tempo und Schrittlängen falsch – hier umstellen, ohne neu zu analysieren.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pane" id="p-areas"><div id="areaList"></div></div>
+
+    <div class="pane" id="p-curves">
+      <div id="curvesNote"></div>
+      <div class="card"><h2 style="font-size:17px">Tempo im Lauf</h2><p class="hint small">Geschätzt aus der Hüfte relativ zum stehenden Fuß – funktioniert auch bei mitschwenkender Kamera. Farbige Bänder = Bodenkontakt (rot links, blau rechts).</p><div id="chartV"></div></div>
+      <div class="card"><h2 style="font-size:17px">Vertikalkraft (Schätzung)</h2><p class="hint small">Aus der Auf-und-ab-Beschleunigung der Hüfte, in Körpergewichten. In der Flugphase liegt die Kurve bei etwa 0, im Stütz entstehen die Spitzen. Relativer Verlauf – keine Kraftmessplatte.</p><div id="chartF"></div></div>
+      <div class="card"><h2 style="font-size:17px">Wer drückt mehr? Links gegen rechts</h2><div id="lrBars"></div><div id="lrTable"></div></div>
+      <div class="card"><h2 style="font-size:17px">Schritt für Schritt</h2><p class="hint small" id="transNote"></p><div id="chartSteps"></div><div id="chartLen"></div><div id="chartAng"></div></div>
+      <div class="card" id="rhythmCard" hidden><h2 style="font-size:17px">Hürdenrhythmus</h2><div id="rhythmBody"></div></div>
+    </div>
+
+    <div class="pane" id="p-kino">
+      <div class="card">
+        <h2>Kinogramm</h2>
+        <p class="hint small">Fünf Schlüsselbilder aus deinem Video nebeneinander. Wähle, welchen Teil du sehen willst. Tippe ein Bild an, um es um einzelne Videobilder früher oder später zu setzen.</p>
+        <div class="seg full" id="kinoMode" style="margin-bottom:10px"><button data-v="run" class="on">Laufschritt</button><button data-v="hurdle">Über die Hürde</button></div>
+        <div class="chips wrap" id="kinoSteps" style="margin-bottom:12px"></div>
+        <div class="kinobig"><canvas id="kinoBig"></canvas></div>
+        <div class="kinowrap"><canvas class="kinocv" id="kinoCanvas"></canvas></div>
+        <div class="kinoadj" id="kinoAdj"></div>
+        <label class="hint small" style="display:flex;gap:8px;align-items:center;margin:12px 0 0"><input type="checkbox" id="kinoSkel" checked> Körperlinien einzeichnen</label>
+        <div class="row" style="margin-top:12px;align-items:center"><button class="btn tint sm" id="kinoSave">Als Bild sichern</button><button class="btn ghost sm" id="kinoReset">Zurücksetzen</button><span class="hint small grow" id="kinoInfo" style="text-align:right"></span></div>
+        <img id="kinoImg" alt="Kinogramm" style="display:none;width:100%;border-radius:12px;margin-top:10px">
+      </div>
+    </div>
+
+    <div class="pane" id="p-figure">
+      <div class="figwrap"><canvas id="figCanvas" width="1000" height="460"></canvas></div>
+      <div class="transport">
+        <button class="tbtn play" id="figPlay" aria-label="Abspielen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.2v13.6a1 1 0 0 0 1.52.85l11-6.8a1 1 0 0 0 0-1.7l-11-6.8A1 1 0 0 0 8 5.2z" fill="currentColor"/></svg></button>
+        <input type="range" id="figSlider" min="0" max="1000" value="0" aria-label="Zeit">
+        <select id="figSpeed" style="width:auto;padding:8px 10px"><option value="0.1">0,1×</option><option value="0.25" selected>0,25×</option><option value="0.5">0,5×</option><option value="1">1×</option></select>
+      </div>
+      <p class="hint small" id="figInfo"></p>
+      <p class="hint small">Ein Doppelschritt aus deinen Daten als Figur mit festen Knochenlängen. Kleidung und Unschärfe verfälschen so nicht die Form. Die gestrichelte Linie ist der Weg deiner Hüfte – dort siehst du Flug und Landung.</p>
+    </div>
+
+    <div class="pane" id="p-steps">
+      <div class="card"><div id="stepTable" class="steplist"></div></div>
+      <div class="card"><h2 style="font-size:17px">Erkennung stimmt nicht?</h2><p class="hint small">Exportiere die Erkennungsdaten (nur Körperpunkte und Einstellungen, kein Video) und schick die Datei an Claude. Damit lässt sich genau nachvollziehen, warum ein Schritt nicht erkannt wurde.</p><button class="btn tint sm" id="diagBtn">Erkennungsdaten exportieren</button></div>
+    </div>
+
+    
+
+  </div>
+
+  <!-- Stapel -->
+  <div class="screen" id="s-batch">
+    <div class="large" style="font-size:28px">Mehrere Videos</div>
+    <p class="sub">Gleiche Einstellungen für alle. Jedes Video wird komplett analysiert (höchstens 6000 Bilder).</p>
+    <div class="card">
+      <div class="stack">
+        <label class="f">Disziplin<div class="seg full" id="bMode"><button data-v="sprint" class="on">Sprint</button><button data-v="hurdle">Hürde</button></div></label>
+        <label class="f">Phase<div class="seg full" id="bPhase"><button data-v="auto" class="on">Auto</button><button data-v="start">Start</button><button data-v="accel">Beschl.</button><button data-v="maxv">Max</button></div></label>
+        <label class="f">Kamera<div class="seg full" id="bCam"><button data-v="pan" class="on">schwenkt mit</button><button data-v="fixed">Stativ</button></div></label>
+        <div class="row"><label class="f">Körpergröße in cm<input type="number" id="bHeight" min="120" max="230" value="180"></label><label class="f">Aufnahme-fps<select id="bFps"><option value="file">wie Datei</option><option>60</option><option>120</option><option>240</option></select></label></div>
+        <div class="row"><label class="f">Strecke<input id="bLabel" list="labelList" placeholder="z. B. 30 m fliegend"></label><label class="f">Datum<input type="date" id="bDate"></label></div>
+      </div>
+      <div class="foot"><button class="btn" id="bCancel">Abbrechen</button><button class="btn primary" id="bRun">Alle analysieren</button></div>
+    </div>
+    <div class="list" id="bList"></div>
+    <div class="foot" id="bActions" hidden><button class="btn" id="bCompare" disabled>Zwei vergleichen</button><button class="btn primary" id="bSaveAll">Alle speichern</button></div>
+  </div>
+</section>
+
+<!-- ======================= LÄUFE ======================= -->
+<section class="view" id="v-laeufe">
+  <div class="row" style="align-items:center"><div class="large grow">Läufe</div><button class="btn ghost" id="selectBtn">Vergleichen</button></div>
+  <p class="sub" id="selectHint">Deine gespeicherten Analysen.</p>
+  <div class="chips" id="labelFilter" style="margin-bottom:12px"></div>
+  <div class="list" id="runList"></div>
+  <h3 style="margin:26px 4px 8px">Daten sichern</h3>
+  <div class="list">
+    <button class="li" id="expJson"><span class="grow">Als Datei sichern (JSON)</span><span class="chev">›</span></button>
+    <button class="li" id="expCsv"><span class="grow">Für Excel exportieren (CSV)</span><span class="chev">›</span></button>
+    <label class="li"><span class="grow">Sicherung importieren</span><span class="chev">›</span><input type="file" id="impJson" accept="application/json,.json" hidden></label>
+    <button class="li" id="migrateBtn" hidden><span class="grow">Läufe aus diesem Browser ins Claude-Konto übernehmen</span><span class="chev">›</span></button>
+  </div>
+  <div id="exportMsg"></div>
+  <textarea id="exportBox" hidden style="margin-top:10px;min-height:120px;font-family:ui-monospace,monospace;font-size:12px"></textarea>
+</section>
+
+<!-- ======================= AUSWERTUNG ======================= -->
+<section class="view" id="v-auswertung">
+  <div class="large">Auswertung</div>
+  <p class="sub">Was hängt bei dir mit schnellen Zeiten zusammen?</p>
+  <div class="chips" id="anaLabels" style="margin-bottom:12px"></div>
+  <div id="anaBody"></div>
+</section>
+
+<!-- ======================= HILFE ======================= -->
+<section class="view" id="v-hilfe">
+  <div class="large">Hilfe</div>
+  <p class="sub">Kurz und knapp.</p>
+  <div class="card">
+    <h2>Filmen</h2>
+    <ol class="tight">
+      <li><b>Von der Seite</b>, im rechten Winkel zur Bahn.</li>
+      <li><b>Hüfthöhe</b>, 8 bis 15 m Abstand, ganzer Körper mit Füßen im Bild.</li>
+      <li><b>Zeitlupe</b> mit 240 fps, mindestens 120.</li>
+      <li><b>Nicht zoomen.</b> Mitschwenken ist in Ordnung.</li>
+    </ol>
+  </div>
+  <div class="card">
+    <h2>Einrichten</h2>
+    <p><b>Ausschnitt:</b> Die App sucht dich im Video. Mit den gelben Griffen passt du an, Wischen über das Video spult.</p>
+    <p style="margin-bottom:0"><b>Details:</b> Größe prüfen. Hürden und eine falsche Bildrate erkennt die App selbst.</p>
+  </div>
+  <div class="card">
+    <h2>Ergebnis</h2>
+    <p><b>Überblick:</b> die wichtigsten Werte und woran du arbeiten kannst.</p>
+    <p><b>Im Video:</b> jeden Wert am echten Bild prüfen, Kontakte korrigieren und mit der Stoppuhr die Zeit zwischen zwei Marken messen.</p>
+    <p style="margin-bottom:0"><b>Hürden:</b> Zeit und Schritte von Hürde zu Hürde. Mit eingetragenem Hürdenabstand auch das Tempo.</p>
+  </div>
+  <div class="card">
+    <h2>Genauigkeit</h2>
+    <p style="margin-bottom:0">Kontaktzeiten sind bei 240 fps auf wenige Millisekunden genau, bei 60 fps auf etwa 5 bis 10. Winkel stimmen nur bei seitlicher Sicht. Längen und Tempo hängen an der Körpergröße. Am verlässlichsten ist das Tempo über Stoppuhr oder Hürdenabstand.</p>
+  </div>
+  <div class="card">
+    <h2>Genaueres Körpermodell</h2>
+    <p>Für den PC. Die Körperpunkte sitzen damit ruhiger, die Analyse dauert etwa dreimal so lang. Lade die Datei einmal herunter und wähle sie hier aus.</p>
+    <p><a href="https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/latest/pose_landmarker_heavy.task">pose_landmarker_heavy.task herunterladen (etwa 30 MB)</a></p>
+    <div class="row"><label class="btn tint sm">Modelldatei wählen<input type="file" id="mdFile" hidden></label><button class="btn sm" id="mdClear" hidden>Entfernen</button></div>
+    <p class="hint small" id="mdInfo" style="margin:10px 0 0"></p>
+  </div>
+  <div class="card">
+    <h2>Speichern</h2>
+    <p class="hint" id="storageHelp" style="margin-bottom:0"></p>
+  </div>
+</section>
+</main>
+
+<nav class="tabbar" id="tabbar">
+  <button data-view="analyse" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="14" cy="4.5" r="2"/><path d="m9 20 3-5.5 3 2.5 1 4"/><path d="M6 11.5 9 8l4 1.5 2 3 3 .5"/><path d="M12 14.5 13 9.5"/></svg>Analyse</button>
+  <button data-view="laeufe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M8 9h8M8 12h8M8 15h5"/></svg>Läufe</button>
+  <button data-view="auswertung"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Auswertung</button>
+  <button data-view="hilfe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6"/><circle cx="12" cy="17" r=".6" fill="currentColor"/></svg>Hilfe</button>
+</nav>
+
+<div id="fsEd" hidden>
+  <canvas class="fs-amb" id="fsAmb" width="48" height="28" aria-hidden="true"></canvas>
+  <div class="fs-bar glass" id="fsBar">
+    <button class="fs-ic" id="fsBack" aria-label="Zurück"><svg viewBox="0 0 12 20" width="9" height="15" aria-hidden="true"><path d="M10 2 2 10l8 8" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <div class="fs-ttl"><b id="fsTitle"></b><span id="fsHint"></span></div>
+    <button class="fs-ic" id="fsHelp" aria-label="Erklärung zu diesem Schritt">?</button>
+    <button class="fs-ic" id="fsClose" aria-label="Vollbild verlassen" hidden><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button>
+    <button class="fs-next" id="fsNext"><span id="fsNextTx">Weiter</span><svg viewBox="0 0 12 20" aria-hidden="true"><path d="M2 2l8 8-8 8" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+  </div>
+  <div class="fs-side" id="fsSide">
+    <div class="fs-tools" id="fsTools"></div>
+    <div class="fs-media glass" id="fsMedia"></div>
+  </div>
+</div>
+<datalist id="labelList"></datalist>
+<div class="scrim" id="scrim"></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true"><div class="grab"></div><div id="sheetBody"></div></div>
+<div class="toast" id="toast"></div>
+
+<script type="module" src="app25.js"></script>
+</body>
+</html>
