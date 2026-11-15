@@ -1024,15 +1024,18 @@ async function detectFrames(lmk, i0, n, fileFps, target, ctx, canvas, prog, targ
     x0 = Math.max(0, Math.min(W - side, x0)); y0 = Math.max(0, Math.min(H - side, y0));
     return { x0: x0 / W, y0: y0 / H, w: side / W, h: side / H };
   };
+  // Alle Posen, die das Modell in diesem Bild gefunden hat (für den Diagnose-Export und Tests): [quelle, punkte]
+  let seen = [];
+  const keep = (src, poses) => { for (const p of poses) seen.push({ src, lm: p.map((q) => [q.x, q.y, q.visibility ?? 1]) }); return poses; };
   const detect = (region, bright) => {
     state.tsBase += 1;
     try {
-      if (!region) { const r = lmk.detectForVideo(video, state.tsBase); return (r && r.landmarks) || []; }
+      if (!region) { const r = lmk.detectForVideo(video, state.tsBase); return keep('full', (r && r.landmarks) || []); }
       const sx = region.x0 * W, sy = region.y0 * H, sw = region.w * W, sh = region.h * H, sc = 640 / Math.max(sw, sh);
       crop.width = Math.round(sw * sc); crop.height = Math.round(sh * sc);
       cctx.drawImage(video, sx, sy, sw, sh, 0, 0, crop.width, crop.height);
       const r = lmk.detectForVideo(bright ? brighten(crop) : crop, state.tsBase);
-      return ((r && r.landmarks) || []).map((pose) => pose.map((p) => ({ x: region.x0 + p.x * region.w, y: region.y0 + p.y * region.h, z: p.z, visibility: p.visibility })));
+      return keep(bright ? 'crop+' : 'crop', ((r && r.landmarks) || []).map((pose) => pose.map((p) => ({ x: region.x0 + p.x * region.w, y: region.y0 + p.y * region.h, z: p.z, visibility: p.visibility }))));
     } catch { return []; }
   };
   const findPose = (prev, tgt) => {
@@ -1065,6 +1068,7 @@ async function detectFrames(lmk, i0, n, fileFps, target, ctx, canvas, prog, targ
     if (state.cancel) break;
     if (k === kT - 1) { prev = anchor; if (prev) { prev._vx = 0; prev._vy = 0; prev._lost = 0; } state.tsBase += 1e5; } // Rückwärts-Durchgang startet bei der angetippten Person
     await seekTo(times[k]);
+    seen = [];
     let pose = findPose(prev, prev ? null : target);
     if (!pose && prev && !target && done < 3) pose = findPose(null, null);
     if (pose) {
@@ -1072,7 +1076,7 @@ async function detectFrames(lmk, i0, n, fileFps, target, ctx, canvas, prog, targ
       pose._lost = 0; prev = pose; if (!anchor && k >= kT) anchor = pose;
     } else if (prev) prev._lost = (prev._lost || 0) + 1;
     const lm = pose ? pose.map((p) => [p.x, p.y, p.visibility ?? 1]) : null;
-    frames[k] = { lm }; done++;
+    frames[k] = { lm, cand: seen }; done++;
     { let fy = NaN; if (lm) { const ys = [29, 30, 31, 32].map((j) => lm[j]).filter((q) => q && q[2] > 0.3).map((q) => q[1]); if (ys.length) fy = Math.max(...ys); } lanes[k] = detectLane(fy); }
     if (ctx && (done % 3 === 0 || done === n)) {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height); drawPose(ctx, lm, canvas.width, canvas.height);
@@ -1103,7 +1107,8 @@ async function runAnalysis() {
   state.tiltKeys = (state.camera === 'pan' && state.lane.length === 2 && state.markT != null) ? [{ i: Math.max(0, Math.min(n - 1, Math.round(state.markT * fileFps) - i0)), a: laneTilt() * Math.PI / 180, y: (state.lane[0].y + state.lane[1].y) / 2 }] : [];
   if (state.cancel) { showScreen('s-setup'); return; }
   const fps = parseNum($('fps').value) || fileFps;
-  state.lane = []; state.calib = []; state.markT = null;
+  // Bahnlinie und A–B-Markierungen bleiben erhalten (früher hier gelöscht, bevor sie gelesen wurden – die Kalibrierung kam so nie an).
+  // Beim Laden eines neuen Videos setzt loadFile() sie zurück.
   const laneLine = state.lane.length === 2 ? { x1: state.lane[0].x, y1: state.lane[0].y, x2: state.lane[1].x, y2: state.lane[1].y } : null;
   const cm = parseNum($('calibM').value);
   const calib = state.calib.length === 2 && cm > 0 && state.camera === 'fixed' ? { x1: state.calib[0].x, y1: state.calib[0].y, x2: state.calib[1].x, y2: state.calib[1].y, meters: cm } : null;
@@ -1434,9 +1439,14 @@ $('stepTable').addEventListener('click', (e) => {
 $('diagBtn').onclick = () => {
   if (!state.frames) return;
   const r4 = (v) => Math.round(v * 1e4) / 1e4;
-  const data = { app: 'sprint-analyse-diagnose', v: 1, created: new Date().toISOString(), file: state.file ? state.file.name : '', fileFps: state.fileFps, i0Frame: state.i0Frame,
-    opts: state.analysisOpts, steps: state.result.steps.length, contacts: state.result.contacts.map((c) => ({ i0: c.i0, i1: c.i1, side: c.side })),
-    frames: state.frames.map((f) => (f.lm ? f.lm.map((p) => [r4(p[0]), r4(p[1]), Math.round(p[2] * 100) / 100]) : null)) };
+  const pts = (lm) => lm.map((p) => [r4(p[0]), r4(p[1]), Math.round(p[2] * 100) / 100]);
+  // v2: zusätzlich alle in jedem Bild gefundenen Posen (cand), Bildzeiten und die angetippte Person – damit lässt sich die Auswertung
+  // ohne Video nachrechnen (tests/run-analysis.mjs) und das Tracking prüfen
+  const data = { app: 'sprint-analyse-diagnose', v: 2, created: new Date().toISOString(), file: state.file ? state.file.name : '', fileFps: state.fileFps, i0Frame: state.i0Frame,
+    W: state.W, H: state.H, personPt: state.personPt || null, personT: state.personT ?? null, times: state.frameTimes || null,
+    opts: state.analysisOpts, steps: state.result.steps.length, contacts: state.result.contacts.map((c) => ({ i0: c.i0, i1: c.i1, side: c.side, td: c.td, to: c.to })),
+    frames: state.frames.map((f) => f.lm || null), // volle Genauigkeit: schon gerundete Punkte verschieben einzelne Kontakte
+    cand: state.frames.map((f) => (f.cand || []).map((c) => ({ src: c.src, lm: pts(c.lm) }))) };
   offerFile(`sprint-diagnose-${today()}.json`, JSON.stringify(data), 'application/json');
   toast('Datei erstellt – schick sie im Chat an Claude');
 };
@@ -2505,4 +2515,4 @@ if (location.hash === '#selbsttest') (async () => {
   try { const t0 = performance.now(); const l = await getLandmarker((t) => { box.textContent = t; }); const c = document.createElement('canvas'); c.width = 320; c.height = 240; c.getContext('2d').fillRect(0, 0, 320, 240); const r = l.detectForVideo(c, 1); box.textContent = `Selbsttest OK – Modell in ${((performance.now() - t0) / 1000).toFixed(1)} s geladen, Erkennung läuft (${r.landmarks.length} Personen im Testbild). Speicher: ${store.mode}.`; }
   catch (e) { box.className = 'notice err'; box.textContent = 'Selbsttest FEHLER: ' + (e && (e.message || e)); }
 })();
-window.__sprint = { state, store, analyze, renderResult, finishResult, saveRun, openCheck, showScreen, autoTune, runAnalyze, keepRunner, renderRunners, snapRunner };
+window.__sprint = { state, store, runAnalysis, analyze, renderResult, finishResult, saveRun, openCheck, showScreen, autoTune, runAnalyze, keepRunner, renderRunners, snapRunner };
