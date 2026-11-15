@@ -1,0 +1,59 @@
+{
+  "diag": "tests/data/IMG_6246_B.base.diag.json",
+  "ref": "tests/data/IMG_6246.ref.json",
+  "fps": 60,
+  "frames": 389,
+  "tracking": {
+    "framesWithPose": 115,
+    "lostFrames": 274,
+    "longestGapMs": 2583,
+    "identityMethod": "Positionen von Hand markiert (ref.persons)",
+    "target": "B",
+    "identitySwitches": 7,
+    "wrongPersonFrames": 61,
+    "unknownFrames": 38,
+    "wrongPersonRuns": [
+      "2.02–2.03 s",
+      "2.07–2.07 s",
+      "2.12–2.17 s",
+      "2.20–2.55 s",
+      "2.98–3.35 s",
+      "3.38–3.40 s",
+      "3.63–3.73 s"
+    ]
+  },
+  "pose": {
+    "Schulter": {
+      "jumpPct": 22,
+      "missingPct": 0
+    },
+    "Hüfte": {
+      "jumpPct": 3.7,
+      "missingPct": 0
+    },
+    "Knie": {
+      "jumpPct": 11.1,
+      "missingPct": 0.4
+    },
+    "Knöchel": {
+      "jumpPct": 23.1,
+      "missingPct": 0.9
+    },
+    "Ferse": {
+      "jumpPct": 24.7,
+      "missingPct": 0.9
+    },
+    "Fußspitze": {
+      "jumpPct": 25.3,
+      "missingPct": 0.4
+    }
+  },
+  "analysis": {
+    "contacts": 7,
+    "includedSteps": 3,
+    "contactMs": 42,
+    "flightMs": 255,
+    "cadenceHz": 3.38,
+    "sameAsApp": true
+  }
+}

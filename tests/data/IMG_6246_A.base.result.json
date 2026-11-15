@@ -1,0 +1,64 @@
+{
+  "diag": "tests/data/IMG_6246_A.base.diag.json",
+  "ref": "tests/data/IMG_6246.ref.json",
+  "fps": 60,
+  "frames": 389,
+  "tracking": {
+    "framesWithPose": 383,
+    "lostFrames": 6,
+    "longestGapMs": 33,
+    "identityMethod": "Positionen von Hand markiert (ref.persons)",
+    "target": "A",
+    "identitySwitches": 10,
+    "wrongPersonFrames": 151,
+    "unknownFrames": 61,
+    "wrongPersonRuns": [
+      "0.25–2.00 s",
+      "2.03–2.03 s",
+      "2.07–2.08 s",
+      "2.20–2.20 s",
+      "3.50–3.50 s",
+      "3.55–3.60 s",
+      "3.82–3.85 s",
+      "3.90–3.90 s",
+      "3.93–4.15 s",
+      "4.28–4.42 s",
+      "4.45–4.50 s",
+      "4.53–4.60 s"
+    ]
+  },
+  "pose": {
+    "Schulter": {
+      "jumpPct": 11.5,
+      "missingPct": 0
+    },
+    "Hüfte": {
+      "jumpPct": 1.9,
+      "missingPct": 0
+    },
+    "Knie": {
+      "jumpPct": 7,
+      "missingPct": 0
+    },
+    "Knöchel": {
+      "jumpPct": 11.9,
+      "missingPct": 0
+    },
+    "Ferse": {
+      "jumpPct": 13.1,
+      "missingPct": 0
+    },
+    "Fußspitze": {
+      "jumpPct": 14.7,
+      "missingPct": 0
+    }
+  },
+  "analysis": {
+    "contacts": 2,
+    "includedSteps": 2,
+    "contactMs": 92,
+    "flightMs": 238,
+    "cadenceHz": 3.13,
+    "sameAsApp": true
+  }
+}
